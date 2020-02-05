@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/kr/pretty"
 	"golang.org/x/tools/go/ast/astutil"
@@ -95,13 +96,12 @@ func pre(cur *astutil.Cursor) bool {
 			if err != nil {
 				log.Fatal(err)
 			}
-			if fnName != "printMap_μ" {
+			if !strings.HasSuffix(fnName, "_μ") {
 				return true
 			}
-			fmt.Printf("Found macro >>%+v<<\n", "printMap_μ") // output for debug
+			fmt.Printf("Found macro >>%+v<<\n", fnName) // output for debug
 			if funIdent, ok := cexp.Fun.(*ast.Ident); ok {
 				if funDecl, ok := funIdent.Obj.Decl.(*ast.FuncDecl); ok {
-					fmt.Printf("%+v\n", "insert body of printmap") // output for debug
 					body := copyBodyStmt(funDecl.Body)
 					// find all body args defined as assignments
 					var bodyArgs []*ast.AssignStmt
