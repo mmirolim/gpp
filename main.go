@@ -198,7 +198,7 @@ func pre(cur *astutil.Cursor) bool {
 			for i := 0; i < len(idents); i++ {
 				//fmt.Printf("Ident %# v\n", pretty.Formatter(ident)) // output for debug
 				ident := idents[i]
-				if !strings.HasSuffix(ident.Name, "_μ") {
+				if !strings.HasSuffix(ident.Name, "_μ") && macroTypeName == "" {
 					continue
 				}
 				fmt.Printf("Macro found  %+v\n", ident.Name) // output for debug
