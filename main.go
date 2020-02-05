@@ -195,7 +195,7 @@ func pre(cur *astutil.Cursor) bool {
 				}
 			}
 			var blocks []ast.Stmt
-			for i := len(idents) - 1; i > -1; i-- {
+			for i := 0; i < len(idents); i++ {
 				//fmt.Printf("Ident %# v\n", pretty.Formatter(ident)) // output for debug
 				ident := idents[i]
 				if !strings.HasSuffix(ident.Name, "_μ") {
@@ -247,9 +247,11 @@ func pre(cur *astutil.Cursor) bool {
 
 			}
 			if len(blocks) > 0 {
-				for i := range blocks {
-					cur.InsertAfter(blocks[i])
-				}
+				blockStmt := new(ast.BlockStmt)
+				blockStmt.Lbrace = cur.Node().End()
+				blockStmt.List = append(blockStmt.List, blocks...)
+				// insert as one block
+				cur.InsertAfter(blockStmt)
 				cur.Delete()
 			}
 
