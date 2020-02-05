@@ -194,7 +194,7 @@ func pre(cur *astutil.Cursor) bool {
 					}
 				}
 			}
-			var blocks []*ast.BlockStmt
+			var blocks []ast.Stmt
 			for i := len(idents) - 1; i > -1; i-- {
 				//fmt.Printf("Ident %# v\n", pretty.Formatter(ident)) // output for debug
 				ident := idents[i]
@@ -235,7 +235,13 @@ func pre(cur *astutil.Cursor) bool {
 					for i, carg := range callArgs[i] {
 						bodyArgs[i].Rhs = []ast.Expr{carg}
 					}
-					blocks = append(blocks, body)
+					// expand body macros
+					astutil.Apply(body, pre, post)
+					if strings.HasPrefix(funDecl.Name.Name, "New") {
+						blocks = append(blocks, body.List...)
+					} else {
+						blocks = append(blocks, body)
+					}
 
 				}
 
