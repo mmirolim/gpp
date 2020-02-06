@@ -179,6 +179,8 @@ func pre(cur *astutil.Cursor) bool {
 			}
 			macroTypeName := ""
 			var newSeqBlocks []ast.Stmt
+			var lastNewSeqStmt ast.Stmt
+			var lastNewSeqSeq *ast.Ident
 			if decl, ok := ident.Obj.Decl.(*ast.FuncDecl); ok {
 				// TODO construct for not only star expressions
 				// can be selector?
@@ -220,34 +222,48 @@ func pre(cur *astutil.Cursor) bool {
 					fmt.Printf("Macro name expand %+v\n", ident.Name) // output for debug
 
 					// TODO refactor what checks needed
-					if ident.Name == "Map" && newSeqBlocks != nil {
+					if (ident.Name == "Map" || ident.Name == "Filter" || ident.Name == "Get") && newSeqBlocks != nil {
 						// create decl state for storing sequence
-						funcLit := callArgs[i][0].(*ast.FuncLit)
-						resultTyp := funcLit.Type.Results.List[0].Type
-						fmt.Printf("Fn of Map %# v\n", pretty.Formatter(funcLit.Body))
+						funcLit, _ := callArgs[i][0].(*ast.FuncLit)
 						// add to new block
-						arrType := &ast.ArrayType{
-							Elt: resultTyp,
+						prevNewSeqBlock := newSeqBlocks[len(newSeqBlocks)-1]
+						var prevObj *ast.Object
+						switch val := prevNewSeqBlock.(type) {
+						case *ast.AssignStmt:
+							prevObj = val.Lhs[0].(*ast.Ident).Obj
+						case *ast.DeclStmt:
+							prevObj = lastNewSeqSeq.Obj
 						}
-						prevSeq := newSeqBlocks[len(newSeqBlocks)-1].(*ast.AssignStmt)
-						stmt, newSeq := newDeclStmt(
-							token.VAR, fmt.Sprintf("%s%d", "seq", i),
-							arrType)
-						newSeqBlocks = append(newSeqBlocks, stmt)
 
 						// assign ident to input
 						callArgs[i] = append(callArgs[i], &ast.Ident{
 							Name: fmt.Sprintf("%s%d", "seq", i-1),
-							Obj:  prevSeq.Lhs[0].(*ast.Ident).Obj,
+							Obj:  prevObj,
 						})
-						// assing unary op to output
-						callArgs[i] = append(callArgs[i], &ast.UnaryExpr{
-							Op: token.AND,
-							X: &ast.Ident{
-								Name: fmt.Sprintf("%s%d", "seq", i),
-								Obj:  newSeq.Obj,
-							},
-						})
+						if ident.Name != "Get" {
+							var resultTyp ast.Expr
+							if ident.Name == "Map" {
+								resultTyp = funcLit.Type.Results.List[0].Type
+							} else if ident.Name == "Filter" {
+								resultTyp = funcLit.Type.Params.List[0].Type
+							}
+							arrType := &ast.ArrayType{
+								Elt: resultTyp,
+							}
+							lastNewSeqStmt, lastNewSeqSeq = newDeclStmt(
+								token.VAR, fmt.Sprintf("%s%d", "seq", i),
+								arrType)
+							newSeqBlocks = append(newSeqBlocks, lastNewSeqStmt)
+
+							// assing unary op to output
+							callArgs[i] = append(callArgs[i], &ast.UnaryExpr{
+								Op: token.AND,
+								X: &ast.Ident{
+									Name: fmt.Sprintf("%s%d", "seq", i),
+									Obj:  lastNewSeqSeq.Obj,
+								},
+							})
+						}
 					}
 					body := copyBodyStmt(len(callArgs[i]),
 						funDecl.Body, true)
@@ -282,6 +298,8 @@ func pre(cur *astutil.Cursor) bool {
 				if newSeqBlocks != nil {
 					blockStmt.List = append(blockStmt.List, newSeqBlocks...)
 					newSeqBlocks = nil
+					lastNewSeqStmt = nil
+					lastNewSeqSeq = nil
 				}
 				blockStmt.List = append(blockStmt.List, blocks...)
 				// insert as one block
