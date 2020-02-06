@@ -219,6 +219,36 @@ func pre(cur *astutil.Cursor) bool {
 				if funDecl != nil { //
 					fmt.Printf("Macro name expand %+v\n", ident.Name) // output for debug
 
+					// TODO refactor what checks needed
+					if ident.Name == "Map" && newSeqBlocks != nil {
+						// create decl state for storing sequence
+						funcLit := callArgs[i][0].(*ast.FuncLit)
+						resultTyp := funcLit.Type.Results.List[0].Type
+						fmt.Printf("Fn of Map %# v\n", pretty.Formatter(funcLit.Body))
+						// add to new block
+						arrType := &ast.ArrayType{
+							Elt: resultTyp,
+						}
+						prevSeq := newSeqBlocks[len(newSeqBlocks)-1].(*ast.AssignStmt)
+						stmt, newSeq := newDeclStmt(
+							token.VAR, fmt.Sprintf("%s%d", "seq", i),
+							arrType)
+						newSeqBlocks = append(newSeqBlocks, stmt)
+
+						// assign ident to input
+						callArgs[i] = append(callArgs[i], &ast.Ident{
+							Name: fmt.Sprintf("%s%d", "seq", i-1),
+							Obj:  prevSeq.Lhs[0].(*ast.Ident).Obj,
+						})
+						// assing unary op to output
+						callArgs[i] = append(callArgs[i], &ast.UnaryExpr{
+							Op: token.AND,
+							X: &ast.Ident{
+								Name: fmt.Sprintf("%s%d", "seq", i),
+								Obj:  newSeq.Obj,
+							},
+						})
+					}
 					body := copyBodyStmt(len(callArgs[i]),
 						funDecl.Body, true)
 					// find all body args defined as assignments
@@ -302,7 +332,8 @@ func objKindToTokenType(typ token.Token) ast.ObjKind {
 }
 
 // creates var {name} {typ};
-func newDeclStmt(num int, decTyp token.Token, name string, typ ast.Expr) *ast.DeclStmt {
+// returns identifier created
+func newDeclStmt(decTyp token.Token, name string, typ ast.Expr) (*ast.DeclStmt, *ast.Ident) {
 	stmt := new(ast.DeclStmt)
 	genDecl := new(ast.GenDecl)
 	genDecl.Tok = decTyp
@@ -319,7 +350,7 @@ func newDeclStmt(num int, decTyp token.Token, name string, typ ast.Expr) *ast.De
 	valSpec.Type = typ
 	genDecl.Specs = []ast.Spec{valSpec}
 	stmt.Decl = genDecl
-	return stmt
+	return stmt, ident
 }
 
 // TODO check with packages
