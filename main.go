@@ -178,6 +178,7 @@ func pre(cur *astutil.Cursor) bool {
 				return true
 			}
 			macroTypeName := ""
+			var newSeqBlocks []ast.Stmt
 			if decl, ok := ident.Obj.Decl.(*ast.FuncDecl); ok {
 				// TODO construct for not only star expressions
 				// can be selector?
@@ -189,8 +190,6 @@ func pre(cur *astutil.Cursor) bool {
 						if strings.HasSuffix(id.Name, macrosymbol) {
 							macroTypeName = id.Name
 						}
-					} else {
-						log.Fatalf("wrong type for results %T", expr)
 					}
 				}
 			}
@@ -206,8 +205,6 @@ func pre(cur *astutil.Cursor) bool {
 				// TODO what to do if obj literal used? Prohibit from constructing
 				// by unexported field?
 
-				//fmt.Printf("Ident %# v\n", pretty.Formatter(ident)) // output for debug
-
 				var funDecl *ast.FuncDecl
 				if ident.Obj == nil && macroTypeName != "" {
 					funDecl = macroMethods[fmt.Sprintf("%s.%s", macroTypeName, ident.Name)]
@@ -221,7 +218,9 @@ func pre(cur *astutil.Cursor) bool {
 
 				if funDecl != nil { //
 					fmt.Printf("Macro name expand %+v\n", ident.Name) // output for debug
-					body := copyBodyStmt(len(callArgs[i]), funDecl.Body, true)
+
+					body := copyBodyStmt(len(callArgs[i]),
+						funDecl.Body, true)
 					// find all body args defined as assignments
 					var bodyArgs []*ast.AssignStmt
 					for _, ln := range body.List {
@@ -237,8 +236,9 @@ func pre(cur *astutil.Cursor) bool {
 					}
 					// expand body macros
 					astutil.Apply(body, pre, post)
+					// New funcs which returns macro type should have parent scope
 					if strings.HasPrefix(funDecl.Name.Name, "New") {
-						blocks = append(blocks, body.List...)
+						newSeqBlocks = body.List
 					} else {
 						blocks = append(blocks, body)
 					}
@@ -249,6 +249,10 @@ func pre(cur *astutil.Cursor) bool {
 			if len(blocks) > 0 {
 				blockStmt := new(ast.BlockStmt)
 				blockStmt.Lbrace = cur.Node().End()
+				if newSeqBlocks != nil {
+					blockStmt.List = append(blockStmt.List, newSeqBlocks...)
+					newSeqBlocks = nil
+				}
 				blockStmt.List = append(blockStmt.List, blocks...)
 				// insert as one block
 				cur.InsertAfter(blockStmt)
@@ -263,6 +267,59 @@ func pre(cur *astutil.Cursor) bool {
 
 func post(cur *astutil.Cursor) bool {
 	return true
+}
+
+// TODO rename
+// returns copy of func literal
+func getFuncLit(decl *ast.FuncDecl) (*ast.FuncLit, bool) {
+	for _, st := range decl.Body.List {
+		if ret, ok := st.(*ast.ReturnStmt); ok && len(ret.Results) == 1 {
+			// only one function to return
+			if fn, ok := ret.Results[0].(*ast.FuncLit); ok {
+				return copyFuncLit(fn), true
+			}
+		}
+	}
+	return nil, false
+}
+
+func copyFuncLit(fn *ast.FuncLit) *ast.FuncLit {
+	cfn := new(ast.FuncLit)
+	cfn.Type = fn.Type // function type
+	// handle only one return statement
+	cfn.Body = copyBodyStmt(0, fn.Body, false)
+	return cfn
+}
+
+func objKindToTokenType(typ token.Token) ast.ObjKind {
+	switch typ {
+	case token.VAR:
+		return ast.Var
+	default:
+		log.Fatalf("unexpected type %+v", typ)
+		return ast.Bad
+	}
+}
+
+// creates var {name} {typ};
+func newDeclStmt(num int, decTyp token.Token, name string, typ ast.Expr) *ast.DeclStmt {
+	stmt := new(ast.DeclStmt)
+	genDecl := new(ast.GenDecl)
+	genDecl.Tok = decTyp
+	valSpec := new(ast.ValueSpec)
+	ident := &ast.Ident{
+		Name: name,
+		Obj: &ast.Object{
+			Kind: objKindToTokenType(decTyp),
+			Name: name,
+			Decl: valSpec,
+		},
+	}
+	valSpec.Names = append(valSpec.Names, ident)
+	valSpec.Type = typ
+	genDecl.Specs = []ast.Spec{valSpec}
+	stmt.Decl = genDecl
+	return stmt
 }
 
 // TODO check with packages
@@ -301,7 +358,8 @@ func copyBodyStmt(argNum int, body *ast.BlockStmt, noreturns bool) *ast.BlockStm
 		// copy
 		block.List = append(block.List, st)
 	}
-	if len(body.List) == 0 {
+	// TODO handle return on macros returning func
+	if len(body.List) == 0 || !noreturns {
 		return block
 	}
 
