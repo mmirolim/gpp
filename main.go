@@ -70,19 +70,15 @@ func parseDir(dir string) error {
 		return err
 	}
 
-	//fmt.Printf("AST %# v\n", pretty.Formatter(pkgs)) // output for debug
 	var file *ast.File
 	var fileName string
+	// TODO process all files
 	for fname := range pkgs["main"].Files {
 		fileName = fname
 		file = pkgs["main"].Files[fname]
 		break
 	}
 	macroMethods = allMacroMethods(file)
-	for k := range macroMethods {
-		fmt.Printf("macro method %+v\n", k) // output for debug
-
-	}
 	out := astutil.Apply(file, pre, post)
 	astStr, err := FormatNode(out)
 	if err != nil {
@@ -156,11 +152,9 @@ func pre(cur *astutil.Cursor) bool {
 				fmt.Printf("[WARN] unhandled method reciver case %T\n", v) // output for debug
 
 			}
-			fmt.Printf("TypeName found %+v\n", typeName) // output for debug
 
 			isMacro = strings.HasSuffix(typeName, "_μ")
 		} else {
-			fmt.Printf("FunDecl found %+v\n", funDecl.Name.Name) // output for debug
 			isMacro = strings.HasSuffix(funDecl.Name.Name, "_μ")
 		}
 		applyState.isOuterMacro = isMacro
@@ -170,9 +164,6 @@ func pre(cur *astutil.Cursor) bool {
 			var callArgs [][]ast.Expr
 			var idents []*ast.Ident
 			identsFromCallExpr(&idents, &callArgs, cexp)
-			fmt.Printf("Args %d Idents %d\n", len(callArgs), len(idents)) // output for debug
-			//fmt.Printf("Call Args %# v\n", pretty.Formatter(callArgs))    // output for debug
-
 			ident := idents[0]
 			if ident.Obj == nil || ident.Obj.Decl == nil {
 				return true
@@ -202,7 +193,6 @@ func pre(cur *astutil.Cursor) bool {
 				if !strings.HasSuffix(ident.Name, "_μ") && macroTypeName == "" {
 					continue
 				}
-				fmt.Printf("Macro found  %+v\n", ident.Name) // output for debug
 				// check if ident has return type
 				// TODO what to do if obj literal used? Prohibit from constructing
 				// by unexported field?
@@ -218,11 +208,9 @@ func pre(cur *astutil.Cursor) bool {
 					}
 				}
 
-				if funDecl != nil { //
-					fmt.Printf("Macro name expand %+v\n", ident.Name) // output for debug
-
+				if funDecl != nil {
 					// TODO refactor what checks needed
-					if (ident.Name == "Map" || ident.Name == "Filter" || ident.Name == "Get") && newSeqBlocks != nil {
+					if (ident.Name == "Map" || ident.Name == "Filter" || ident.Name == "Get" || ident.Name == "Reduce") && newSeqBlocks != nil {
 						// create decl state for storing sequence
 						funcLit, _ := callArgs[i][0].(*ast.FuncLit)
 						// add to new block
@@ -240,7 +228,7 @@ func pre(cur *astutil.Cursor) bool {
 							Name: fmt.Sprintf("%s%d", "seq", i-1),
 							Obj:  prevObj,
 						})
-						if ident.Name != "Get" {
+						if ident.Name != "Get" && ident.Name != "Reduce" {
 							var resultTyp ast.Expr
 							if ident.Name == "Map" {
 								resultTyp = funcLit.Type.Results.List[0].Type
@@ -274,6 +262,7 @@ func pre(cur *astutil.Cursor) bool {
 							bodyArgs = append(bodyArgs, st)
 						}
 					}
+
 					// TODO check that number of args is correct
 					// switch Rhs with call args
 					// TODO support multiple declaration in one line
@@ -430,26 +419,29 @@ func copyBodyStmt(argNum int, body *ast.BlockStmt, noreturns bool) *ast.BlockStm
 
 // fnNameFromCallExpr returns name of func/method call
 // from ast.CallExpr
-func fnNameFromCallExpr(fn *ast.CallExpr) string {
+// TODO test with closure()().Method and arr[i].Param.Method calls
+func fnNameFromCallExpr(fn *ast.CallExpr) (string, error) {
+	var err error
 	var fname string
-	var combineName func(*ast.SelectorExpr) string
+	var combineName func(*ast.SelectorExpr) (string, error)
 
-	combineName = func(expr *ast.SelectorExpr) string {
+	combineName = func(expr *ast.SelectorExpr) (string, error) {
 		switch v := expr.X.(type) {
 		case *ast.Ident:
 			// base case
-			return v.Name + "." + expr.Sel.Name
+			return v.Name + "." + expr.Sel.Name, nil
 		case *ast.SelectorExpr:
-			return combineName(v) + "." + expr.Sel.Name
+			fname, err := combineName(v)
+			return fname + "." + expr.Sel.Name, err
 		case *ast.CallExpr:
-			return fnNameFromCallExpr(v) + "." + expr.Sel.Name
+			fname, err := fnNameFromCallExpr(v)
+			return fname + "." + expr.Sel.Name, err
 		default:
 			fmt.Printf("combine: unexpected AST %# v\n", pretty.Formatter(v)) // output for debug
 			out, err := FormatNode(v)
 			fmt.Printf("Err node print err %v out %+v\n", err, out) // output for debug
 
-			log.Fatalf("unexpected value %T", v)
-			return ""
+			return "", fmt.Errorf("unexpected value %T", v)
 		}
 	}
 
@@ -458,13 +450,16 @@ func fnNameFromCallExpr(fn *ast.CallExpr) string {
 		// base case
 		fname = v.Name
 	case *ast.SelectorExpr:
-		fname = combineName(v)
+		fname, err = combineName(v)
+		if err != nil {
+			return "", err
+		}
 	default:
 		fmt.Printf("unexpected AST %# v\n", pretty.Formatter(v)) // output for debug
-		log.Fatalf("unexpected value %T", v)
+		return "", fmt.Errorf("unexpected value %T", v)
 	}
 
-	return fname
+	return fname, nil
 }
 
 func FormatNode(node ast.Node) (string, error) {
