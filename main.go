@@ -18,9 +18,19 @@ import (
 	"golang.org/x/tools/go/ast/astutil"
 )
 
+const (
+	macrosymbol = "_μ"
+	seq_μType   = "seq_μ"
+)
+
 var (
 	dst = flag.String("C", ".", "working directory")
 	src = "/dev/shm/gm"
+	// define custom macro expand functions
+	// TODO make settable
+	macroExpanders = map[string]MacroExpander{
+		seq_μType: MacroNewSeq,
+	}
 )
 
 func main() {
@@ -79,6 +89,7 @@ func parseDir(dir string) error {
 		break
 	}
 	macroMethods = allMacroMethods(file)
+
 	out := astutil.Apply(file, pre, post)
 	astStr, err := FormatNode(out)
 	if err != nil {
@@ -91,35 +102,36 @@ func parseDir(dir string) error {
 	return err
 }
 
-const macrosymbol = "_μ"
-
 // TODO should resolve across packages
 func allMacroMethods(f *ast.File) map[string]*ast.FuncDecl {
 	methods := make(map[string]*ast.FuncDecl)
 	for _, decl := range f.Decls {
-		if fnDecl, ok := decl.(*ast.FuncDecl); ok {
-			if fnDecl.Recv != nil {
-				typeName := ""
-				// method
-				switch v := fnDecl.Recv.List[0].Type.(type) {
-				case *ast.Ident:
-					typeName = v.Name
-				case *ast.StarExpr:
-					ident, ok := v.X.(*ast.Ident)
-					if ok {
-						typeName = ident.Name
-					} else {
-						log.Fatalf("unexpected ast type %T", v.X)
-					}
-
-				default:
-					log.Fatalf("[WARN] unhandled method reciver case %T\n", v)
-
-				}
-				if strings.HasSuffix(typeName, macrosymbol) {
-					methods[fmt.Sprintf("%s.%s", typeName, fnDecl.Name.Name)] = fnDecl
-				}
+		fnDecl, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if fnDecl.Recv == nil {
+			continue
+		}
+		typeName := ""
+		// method
+		switch v := fnDecl.Recv.List[0].Type.(type) {
+		case *ast.Ident:
+			typeName = v.Name
+		case *ast.StarExpr:
+			ident, ok := v.X.(*ast.Ident)
+			if ok {
+				typeName = ident.Name
+			} else {
+				log.Fatalf("unexpected ast type %T", v.X)
 			}
+
+		default:
+			log.Fatalf("[WARN] unhandled method reciver case %T\n", v)
+
+		}
+		if strings.HasSuffix(typeName, macrosymbol) {
+			methods[fmt.Sprintf("%s.%s", typeName, fnDecl.Name.Name)] = fnDecl
 		}
 	}
 	return methods
@@ -129,37 +141,42 @@ var applyState = struct {
 	isOuterMacro bool
 }{}
 
+func isMacroDecl(decl *ast.FuncDecl) bool {
+	if decl == nil {
+		return false
+	}
+	if decl.Recv == nil {
+		return strings.HasSuffix(decl.Name.Name, "_μ")
+	}
+	// method
+	fld := decl.Recv.List[0]
+	typeName := ""
+	switch v := fld.Type.(type) {
+	case *ast.Ident:
+		typeName = v.Name
+	case *ast.StarExpr:
+		ident, ok := v.X.(*ast.Ident)
+		if ok {
+			typeName = ident.Name
+		} else {
+			log.Fatalf("unexpected ast type %T", v.X)
+		}
+	default:
+		fmt.Printf("[WARN] unhandled method reciver case %T\n", v)
+	}
+
+	return strings.HasSuffix(typeName, "_μ")
+}
+
 func pre(cur *astutil.Cursor) bool {
 	n := cur.Node()
 	// on macro define do not expand it
 	if funDecl, ok := n.(*ast.FuncDecl); ok {
-		isMacro := false
-		if funDecl.Recv != nil {
-			// method
-			fld := funDecl.Recv.List[0]
-			typeName := ""
-			switch v := fld.Type.(type) {
-			case *ast.Ident:
-				typeName = v.Name
-			case *ast.StarExpr:
-				ident, ok := v.X.(*ast.Ident)
-				if ok {
-					typeName = ident.Name
-				} else {
-					log.Fatalf("unexpected ast type %T", v.X)
-				}
-			default:
-				fmt.Printf("[WARN] unhandled method reciver case %T\n", v) // output for debug
-
-			}
-
-			isMacro = strings.HasSuffix(typeName, "_μ")
-		} else {
-			isMacro = strings.HasSuffix(funDecl.Name.Name, "_μ")
-		}
-		applyState.isOuterMacro = isMacro
+		applyState.isOuterMacro = isMacroDecl(funDecl)
 	}
-	if estmt, ok := n.(*ast.ExprStmt); ok && !applyState.isOuterMacro {
+	estmt, ok := n.(*ast.ExprStmt)
+	if ok && !applyState.isOuterMacro {
+		// apply macro expand rules
 		if cexp, ok := estmt.X.(*ast.CallExpr); ok {
 			var callArgs [][]ast.Expr
 			var idents []*ast.Ident
@@ -169,9 +186,6 @@ func pre(cur *astutil.Cursor) bool {
 				return true
 			}
 			macroTypeName := ""
-			var newSeqBlocks []ast.Stmt
-			var lastNewSeqStmt ast.Stmt
-			var lastNewSeqSeq *ast.Ident
 			if decl, ok := ident.Obj.Decl.(*ast.FuncDecl); ok {
 				// TODO construct for not only star expressions
 				// can be selector?
@@ -186,119 +200,18 @@ func pre(cur *astutil.Cursor) bool {
 					}
 				}
 			}
-			var blocks []ast.Stmt
-			for i := 0; i < len(idents); i++ {
-				//fmt.Printf("Ident %# v\n", pretty.Formatter(ident)) // output for debug
-				ident := idents[i]
-				if !strings.HasSuffix(ident.Name, "_μ") && macroTypeName == "" {
-					continue
-				}
-				// check if ident has return type
-				// TODO what to do if obj literal used? Prohibit from constructing
-				// by unexported field?
 
-				var funDecl *ast.FuncDecl
-				if ident.Obj == nil && macroTypeName != "" {
-					funDecl = macroMethods[fmt.Sprintf("%s.%s", macroTypeName, ident.Name)]
-				} else {
-					var ok bool
-					funDecl, ok = ident.Obj.Decl.(*ast.FuncDecl)
-					if !ok {
-						log.Fatalf("funDecl expected but got %+v", ident.Obj.Decl)
-					}
-				}
-
-				if funDecl != nil {
-					// TODO refactor what checks needed
-					if (ident.Name == "Map" || ident.Name == "Filter" || ident.Name == "Get" || ident.Name == "Reduce") && newSeqBlocks != nil {
-						// create decl state for storing sequence
-						funcLit, _ := callArgs[i][0].(*ast.FuncLit)
-						// add to new block
-						prevNewSeqBlock := newSeqBlocks[len(newSeqBlocks)-1]
-						var prevObj *ast.Object
-						switch val := prevNewSeqBlock.(type) {
-						case *ast.AssignStmt:
-							prevObj = val.Lhs[0].(*ast.Ident).Obj
-						case *ast.DeclStmt:
-							prevObj = lastNewSeqSeq.Obj
-						}
-
-						// assign ident to input
-						callArgs[i] = append(callArgs[i], &ast.Ident{
-							Name: fmt.Sprintf("%s%d", "seq", i-1),
-							Obj:  prevObj,
-						})
-						if ident.Name != "Get" && ident.Name != "Reduce" {
-							var resultTyp ast.Expr
-							if ident.Name == "Map" {
-								resultTyp = funcLit.Type.Results.List[0].Type
-							} else if ident.Name == "Filter" {
-								resultTyp = funcLit.Type.Params.List[0].Type
-							}
-							arrType := &ast.ArrayType{
-								Elt: resultTyp,
-							}
-							lastNewSeqStmt, lastNewSeqSeq = newDeclStmt(
-								token.VAR, fmt.Sprintf("%s%d", "seq", i),
-								arrType)
-							newSeqBlocks = append(newSeqBlocks, lastNewSeqStmt)
-
-							// assing unary op to output
-							callArgs[i] = append(callArgs[i], &ast.UnaryExpr{
-								Op: token.AND,
-								X: &ast.Ident{
-									Name: fmt.Sprintf("%s%d", "seq", i),
-									Obj:  lastNewSeqSeq.Obj,
-								},
-							})
-						}
-					}
-					body := copyBodyStmt(len(callArgs[i]),
-						funDecl.Body, true)
-					// find all body args defined as assignments
-					var bodyArgs []*ast.AssignStmt
-					for _, ln := range body.List {
-						if st, ok := ln.(*ast.AssignStmt); ok {
-							bodyArgs = append(bodyArgs, st)
-						}
-					}
-
-					// TODO check that number of args is correct
-					// switch Rhs with call args
-					// TODO support multiple declaration in one line
-					for i, carg := range callArgs[i] {
-						bodyArgs[i].Rhs = []ast.Expr{carg}
-					}
-					// expand body macros
-					astutil.Apply(body, pre, post)
-					// New funcs which returns macro type should have parent scope
-					if strings.HasPrefix(funDecl.Name.Name, "New") {
-						newSeqBlocks = body.List
-					} else {
-						blocks = append(blocks, body)
-					}
-
-				}
-
+			// get expand func
+			if expand, ok := macroExpanders[macroTypeName]; ok {
+				expand(cur, idents, callArgs, pre)
+			} else if expand, ok := macroExpanders[ident.Name]; ok {
+				expand(cur, idents, callArgs, pre)
+			} else {
+				macroGeneralExpand(cur, idents, callArgs, pre)
 			}
-			if len(blocks) > 0 {
-				blockStmt := new(ast.BlockStmt)
-				blockStmt.Lbrace = cur.Node().End()
-				if newSeqBlocks != nil {
-					blockStmt.List = append(blockStmt.List, newSeqBlocks...)
-					newSeqBlocks = nil
-					lastNewSeqStmt = nil
-					lastNewSeqSeq = nil
-				}
-				blockStmt.List = append(blockStmt.List, blocks...)
-				// insert as one block
-				cur.InsertAfter(blockStmt)
-				cur.Delete()
-			}
-
 		}
-
 	}
+
 	return true
 }
 
@@ -469,4 +382,195 @@ func FormatNode(node ast.Node) (string, error) {
 		fmt.Printf("AST on error %+v\n", pretty.Formatter(node)) // output for debug
 	}
 	return buf.String(), err
+}
+
+type MacroExpander func(*astutil.Cursor, []*ast.Ident, [][]ast.Expr, astutil.ApplyFunc) bool
+
+type MacroCtxKey string
+
+const (
+	NewSeqKey MacroCtxKey = "NewSeqKey"
+)
+
+// special rules
+func MacroNewSeq(
+	cur *astutil.Cursor,
+	idents []*ast.Ident,
+	callArgs [][]ast.Expr,
+	pre astutil.ApplyFunc) bool {
+
+	var newSeqBlocks []ast.Stmt
+	var lastNewSeqStmt ast.Stmt
+	var lastNewSeqSeq *ast.Ident
+	var blocks []ast.Stmt
+
+	for i := 0; i < len(idents); i++ {
+		ident := idents[i]
+		// check if ident has return type
+		// TODO what to do if obj literal used? Prohibit from constructing
+		// by unexported field?
+		var funDecl *ast.FuncDecl
+		if ident.Obj == nil {
+			funDecl = macroMethods[fmt.Sprintf("%s.%s", seq_μType, ident.Name)]
+			if funDecl == nil {
+				fmt.Printf("WARN Method Decl not found %+v\n", ident.Name) // output for debug
+
+				continue
+			}
+
+		} else {
+			var ok bool
+			funDecl, ok = ident.Obj.Decl.(*ast.FuncDecl)
+			if !ok {
+				log.Fatalf("funDecl expected but got %+v", ident.Obj.Decl)
+			}
+		}
+		if ident.Name != "NewSeq_μ" && newSeqBlocks != nil {
+			// TODO refactor what checks needed
+			// create decl state for storing sequence
+			funcLit, _ := callArgs[i][0].(*ast.FuncLit)
+			// add to new block
+			prevNewSeqBlock := newSeqBlocks[len(newSeqBlocks)-1]
+			var prevObj *ast.Object
+			switch val := prevNewSeqBlock.(type) {
+			case *ast.AssignStmt:
+				prevObj = val.Lhs[0].(*ast.Ident).Obj
+			case *ast.DeclStmt:
+				prevObj = lastNewSeqSeq.Obj
+			}
+
+			// assign ident to input
+			callArgs[i] = append(callArgs[i], &ast.Ident{
+				Name: fmt.Sprintf("%s%d", "seq", i-1),
+				Obj:  prevObj,
+			})
+			if ident.Name != "Get" && ident.Name != "Reduce" {
+				var resultTyp ast.Expr
+				if ident.Name == "Map" {
+					resultTyp = funcLit.Type.Results.List[0].Type
+				} else if ident.Name == "Filter" {
+					resultTyp = funcLit.Type.Params.List[0].Type
+				}
+				arrType := &ast.ArrayType{
+					Elt: resultTyp,
+				}
+				lastNewSeqStmt, lastNewSeqSeq = newDeclStmt(
+					token.VAR, fmt.Sprintf("%s%d", "seq", i),
+					arrType)
+				newSeqBlocks = append(newSeqBlocks, lastNewSeqStmt)
+
+				// assing unary op to output
+				callArgs[i] = append(callArgs[i], &ast.UnaryExpr{
+					Op: token.AND,
+					X: &ast.Ident{
+						Name: fmt.Sprintf("%s%d", "seq", i),
+						Obj:  lastNewSeqSeq.Obj,
+					},
+				})
+			}
+		}
+		body := copyBodyStmt(len(callArgs[i]),
+			funDecl.Body, true)
+		// find all body args defined as assignments
+		var bodyArgs []*ast.AssignStmt
+		for _, ln := range body.List {
+			if st, ok := ln.(*ast.AssignStmt); ok {
+				bodyArgs = append(bodyArgs, st)
+			}
+		}
+
+		// TODO check that number of args is correct
+		// switch Rhs with call args
+		// TODO support multiple declaration in one line
+		for i, carg := range callArgs[i] {
+			bodyArgs[i].Rhs = []ast.Expr{carg}
+		}
+		// expand body macros
+		astutil.Apply(body, pre, post)
+		// New funcs which returns macro type should have parent scope
+		if strings.HasPrefix(funDecl.Name.Name, "New") {
+			newSeqBlocks = body.List
+		} else {
+			blocks = append(blocks, body)
+		}
+
+	}
+
+	if len(blocks) > 0 {
+		blockStmt := new(ast.BlockStmt)
+		blockStmt.Lbrace = cur.Node().End()
+		if newSeqBlocks != nil {
+			blockStmt.List = append(blockStmt.List, newSeqBlocks...)
+			newSeqBlocks = nil
+			lastNewSeqStmt = nil
+			lastNewSeqSeq = nil
+		}
+		blockStmt.List = append(blockStmt.List, blocks...)
+		// insert as one block
+		cur.InsertAfter(blockStmt)
+		cur.Delete()
+	}
+
+	return true
+}
+
+// general rules
+// TODO describe rules
+func macroGeneralExpand(
+	cur *astutil.Cursor,
+	idents []*ast.Ident,
+	callArgs [][]ast.Expr,
+	pre astutil.ApplyFunc) bool {
+	var newSeqBlocks []ast.Stmt
+	var blocks []ast.Stmt
+
+	for i := 0; i < len(idents); i++ {
+		ident := idents[i]
+		if !strings.HasSuffix(ident.Name, "_μ") {
+			continue
+		}
+		// check if ident has return type
+		// TODO what to do if obj literal used? Prohibit from constructing
+		// by unexported field?
+		var funDecl *ast.FuncDecl
+		var ok bool
+		if funDecl, ok = ident.Obj.Decl.(*ast.FuncDecl); !ok {
+			log.Fatalf("funDecl expected but got %+v", ident.Obj.Decl)
+		}
+		// TODO refactor what checks needed
+		body := copyBodyStmt(len(callArgs[i]),
+			funDecl.Body, true)
+		// find all body args defined as assignments
+		var bodyArgs []*ast.AssignStmt
+		for _, ln := range body.List {
+			if st, ok := ln.(*ast.AssignStmt); ok {
+				bodyArgs = append(bodyArgs, st)
+			}
+		}
+
+		// TODO check that number of args is correct
+		// switch Rhs with call args
+		// TODO support multiple declaration in one line
+		for i, carg := range callArgs[i] {
+			bodyArgs[i].Rhs = []ast.Expr{carg}
+		}
+		// expand body macros
+		astutil.Apply(body, pre, post)
+		blocks = append(blocks, body)
+
+	}
+	if len(blocks) > 0 {
+		blockStmt := new(ast.BlockStmt)
+		blockStmt.Lbrace = cur.Node().End()
+		if newSeqBlocks != nil {
+			blockStmt.List = append(blockStmt.List, newSeqBlocks...)
+			newSeqBlocks = nil
+		}
+		blockStmt.List = append(blockStmt.List, blocks...)
+		// insert as one block
+		cur.InsertAfter(blockStmt)
+		cur.Delete()
+	}
+
+	return true
 }
