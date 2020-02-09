@@ -21,6 +21,7 @@ import (
 const (
 	macrosymbol = "_μ"
 	seq_μType   = "seq_μ"
+	try_μ       = "try_μ"
 )
 
 var (
@@ -30,6 +31,7 @@ var (
 	// TODO make settable
 	macroExpanders = map[string]MacroExpander{
 		seq_μType: MacroNewSeq,
+		try_μ:     macroTryExpand,
 	}
 )
 
@@ -91,6 +93,7 @@ func parseDir(dir string) error {
 	macroMethods = allMacroMethods(file)
 
 	out := astutil.Apply(file, pre, post)
+	applyState.isOuterMacro = false
 	astStr, err := FormatNode(out)
 	if err != nil {
 		return err
@@ -137,6 +140,7 @@ func allMacroMethods(f *ast.File) map[string]*ast.FuncDecl {
 	return methods
 }
 
+// TODO move to context?
 var applyState = struct {
 	isOuterMacro bool
 }{}
@@ -174,42 +178,65 @@ func pre(cur *astutil.Cursor) bool {
 	if funDecl, ok := n.(*ast.FuncDecl); ok {
 		applyState.isOuterMacro = isMacroDecl(funDecl)
 	}
-	estmt, ok := n.(*ast.ExprStmt)
-	if ok && !applyState.isOuterMacro {
-		// apply macro expand rules
-		if cexp, ok := estmt.X.(*ast.CallExpr); ok {
-			var callArgs [][]ast.Expr
-			var idents []*ast.Ident
-			identsFromCallExpr(&idents, &callArgs, cexp)
-			ident := idents[0]
-			if ident.Obj == nil || ident.Obj.Decl == nil {
-				return true
-			}
-			macroTypeName := ""
-			if decl, ok := ident.Obj.Decl.(*ast.FuncDecl); ok {
-				// TODO construct for not only star expressions
-				// can be selector?
-				if decl.Type.Results != nil && decl.Type.Results.List[0] != nil {
-					expr, ok := decl.Type.Results.List[0].Type.(*ast.StarExpr)
-					if ok {
-						//  TODO use recursive solution
-						id := expr.X.(*ast.Ident)
-						if strings.HasSuffix(id.Name, macrosymbol) {
-							macroTypeName = id.Name
-						}
-					}
-				}
-			}
+	// process AssignStmt
 
-			// get expand func
-			if expand, ok := macroExpanders[macroTypeName]; ok {
-				expand(cur, idents, callArgs, pre)
-			} else if expand, ok := macroExpanders[ident.Name]; ok {
-				expand(cur, idents, callArgs, pre)
-			} else {
-				macroGeneralExpand(cur, idents, callArgs, pre)
+	if applyState.isOuterMacro {
+		return false
+	}
+	var parentStmt ast.Stmt
+	var callExpr *ast.CallExpr
+	// as standalone expr
+	if estmt, ok := n.(*ast.ExprStmt); ok {
+		if cexp, ok := estmt.X.(*ast.CallExpr); ok {
+			parentStmt = estmt
+			callExpr = cexp
+		}
+	}
+	// in assignment
+	if assign, ok := n.(*ast.AssignStmt); ok {
+		for i := range assign.Rhs {
+			if cexp, ok := assign.Rhs[i].(*ast.CallExpr); ok {
+				parentStmt = assign
+				callExpr = cexp
 			}
 		}
+
+	}
+	if callExpr == nil {
+		return true
+	}
+	// apply macro expand rules
+	var callArgs [][]ast.Expr
+	var idents []*ast.Ident
+
+	identsFromCallExpr(&idents, &callArgs, callExpr)
+	ident := idents[0]
+	if ident.Obj == nil || ident.Obj.Decl == nil {
+		return true
+	}
+	macroTypeName := ""
+	if decl, ok := ident.Obj.Decl.(*ast.FuncDecl); ok {
+		// TODO construct for not only star expressions
+		// can be selector?
+		if decl.Type.Results != nil && decl.Type.Results.List[0] != nil {
+			expr, ok := decl.Type.Results.List[0].Type.(*ast.StarExpr)
+			if ok {
+				//  TODO use recursive solution
+				id := expr.X.(*ast.Ident)
+				if strings.HasSuffix(id.Name, macrosymbol) {
+					macroTypeName = id.Name
+				}
+			}
+		}
+	}
+
+	// get expand func
+	if expand, ok := macroExpanders[macroTypeName]; ok {
+		expand(cur, parentStmt, idents, callArgs, pre)
+	} else if expand, ok := macroExpanders[ident.Name]; ok {
+		expand(cur, parentStmt, idents, callArgs, pre)
+	} else if strings.HasSuffix(ident.Name, macrosymbol) {
+		macroGeneralExpand(cur, parentStmt, idents, callArgs, pre)
 	}
 
 	return true
@@ -384,17 +411,12 @@ func FormatNode(node ast.Node) (string, error) {
 	return buf.String(), err
 }
 
-type MacroExpander func(*astutil.Cursor, []*ast.Ident, [][]ast.Expr, astutil.ApplyFunc) bool
-
-type MacroCtxKey string
-
-const (
-	NewSeqKey MacroCtxKey = "NewSeqKey"
-)
+type MacroExpander func(*astutil.Cursor, ast.Stmt, []*ast.Ident, [][]ast.Expr, astutil.ApplyFunc) bool
 
 // special rules
 func MacroNewSeq(
 	cur *astutil.Cursor,
+	parentStmt ast.Stmt,
 	idents []*ast.Ident,
 	callArgs [][]ast.Expr,
 	pre astutil.ApplyFunc) bool {
@@ -518,6 +540,7 @@ func MacroNewSeq(
 // TODO describe rules
 func macroGeneralExpand(
 	cur *astutil.Cursor,
+	parentStmt ast.Stmt,
 	idents []*ast.Ident,
 	callArgs [][]ast.Expr,
 	pre astutil.ApplyFunc) bool {
@@ -573,4 +596,88 @@ func macroGeneralExpand(
 	}
 
 	return true
+}
+
+// TODO gtr didn't find test to run for this function
+// Define rules to expand, like func signature, last lhs is err
+// which is checked and so on
+func macroTryExpand(
+	cur *astutil.Cursor,
+	parentStmt ast.Stmt,
+	idents []*ast.Ident,
+	callArgs [][]ast.Expr,
+	pre astutil.ApplyFunc) bool {
+	if len(idents) > 0 && idents[0].Name != try_μ {
+		return false
+	}
+
+	if len(callArgs[0]) == 0 {
+		return false
+	}
+	// func lit is arg of try
+	funcLit, ok := callArgs[0][0].(*ast.FuncLit)
+	if !ok {
+		fmt.Printf("WARN expected Try macro, got %+v\n", callArgs[0]) // output for debug
+		return false
+	}
+	// expected assignstmt
+	pstmt := parentStmt.(*ast.AssignStmt)
+	// check all errors
+	var bodyList []ast.Stmt
+	// create new err variable
+	errDecl, errIdent := newDeclStmt(token.VAR, "err", &ast.Ident{Name: "error"})
+	bodyList = append(bodyList, errDecl)
+	for _, stmt := range funcLit.Body.List {
+		bodyList = append(bodyList, stmt)
+		// only assignment handled
+		// expr stmt difficult to resolve during parsing what does it return
+		if assignStmt, ok := stmt.(*ast.AssignStmt); ok {
+			// expect last unused variable to be an error
+			lastVar := assignStmt.Lhs[len(assignStmt.Lhs)-1].(*ast.Ident)
+			if lastVar.Name != "_" {
+				continue
+			}
+			// replace with err
+			assignStmt.Lhs[len(assignStmt.Lhs)-1] = errIdent
+			bodyList = append(bodyList, createIfErrRetStmt(errIdent))
+		}
+	}
+	funcLit.Body.List = bodyList
+	callExpr := createCallExpr(funcLit, nil)
+	pstmt.Rhs = []ast.Expr{callExpr}
+	// expand body macros
+	astutil.Apply(callExpr, pre, post)
+
+	return true
+}
+
+func createCallExpr(fun ast.Expr, args []ast.Expr) *ast.CallExpr {
+	expr := &ast.CallExpr{
+		Fun:  fun,
+		Args: args,
+	}
+	return expr
+}
+
+func createIfErrRetStmt(err ast.Expr) *ast.IfStmt {
+	stmt := &ast.IfStmt{
+		Cond: &ast.BinaryExpr{
+			X: err, Op: token.NEQ, Y: &ast.Ident{Name: "nil"},
+		},
+		Body: &ast.BlockStmt{
+			List: []ast.Stmt{
+				&ast.ReturnStmt{
+					Results: []ast.Expr{err},
+				},
+			},
+		},
+	}
+	return stmt
+}
+
+func createAssignStmt(lhs, rhs []ast.Expr, tok token.Token) *ast.AssignStmt {
+	stmt := &ast.AssignStmt{
+		Lhs: lhs, Tok: tok, Rhs: rhs,
+	}
+	return stmt
 }

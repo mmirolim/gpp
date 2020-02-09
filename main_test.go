@@ -43,13 +43,25 @@ func TestMacro(t *testing.T) {
 		err     error
 	}{
 		{
-			desc:    "Test NewSeq M/F fluent api",
+			desc:    "Test NewSeq M/F/R fluent api",
 			testDir: filepath.Join(testDir, "newseq"),
-			output: `Test NewSeq Map/Filter [{strLen:3} {strLen:3}]
-Test NewSeq Reduce 12`,
+			output: `
+Test NewSeq Map/Filter [{strLen:3} {strLen:3}]
+Test NewSeq Reduce 12
+`,
+			err: nil,
+		},
+		{
+			desc:    "Test try_μ",
+			testDir: filepath.Join(testDir, "try"),
+			output: `
+Expect (result, err) (0, fPtrIntError error), got (0, fPtrIntError error)
+Expect (result, err) (1, <nil>), got (1, <nil>)
+`,
 			err: nil,
 		},
 	}
+
 	var buf bytes.Buffer
 	for i, tc := range cases {
 		buf.Reset()
