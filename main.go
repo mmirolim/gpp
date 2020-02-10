@@ -654,6 +654,11 @@ func macroTryExpand(
 		}
 	}
 	funcLit.Body.List = bodyList
+	// last element should be return
+	ret, ok := bodyList[len(bodyList)-1].(*ast.ReturnStmt)
+	if ok {
+		ret.Results[0] = errIdent
+	}
 	callExpr := createCallExpr(funcLit, nil)
 	pstmt.Rhs = []ast.Expr{callExpr}
 	// expand body macros

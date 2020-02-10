@@ -64,19 +64,20 @@ Expect (result, err) (1, <nil>), got (1, <nil>)
 			desc:    "Test log_μ",
 			testDir: filepath.Join(testDir, "log"),
 			output: `
-/tmp/gm-test-macro/testdata/log/main.go:13
+/tmp/gm-test-macro/testdata/log/main.go:12
 result before
 result=0
-/tmp/gm-test-macro/testdata/log/main.go:15
+/tmp/gm-test-macro/testdata/log/main.go:14
 result after
 result=10
-/tmp/gm-test-macro/testdata/log/main.go:19
+/tmp/gm-test-macro/testdata/log/main.go:17
 try err
-err=&errors.errorString{s:"fErr error"}
+err=<nil>
 `,
 			err: nil,
 		},
 	}
+
 	var buf bytes.Buffer
 	for i, tc := range cases {
 		buf.Reset()
