@@ -15,7 +15,7 @@ func Try_μ(fn interface{}) error {
 // TODO gtr didn't find test to run for this function
 // Define rules to expand, like func signature, last lhs is err
 // which is checked and so on
-// TODO Wrap errors with callexpr names to be able to identify it
+// TODO only closures or any function?
 func MacroTryExpand(
 	cur *astutil.Cursor,
 	parentStmt ast.Stmt,

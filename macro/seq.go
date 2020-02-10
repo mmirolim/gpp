@@ -121,9 +121,6 @@ func MacroNewSeq(
 			}
 		}
 		if ident.Name != "NewSeq_μ" && newSeqBlocks != nil {
-			// TODO refactor what checks needed
-			// create decl state for storing sequence
-			funcLit, _ := callArgs[i][0].(*ast.FuncLit)
 			// add to new block
 			prevNewSeqBlock := newSeqBlocks[len(newSeqBlocks)-1]
 			var prevObj *ast.Object
@@ -141,11 +138,28 @@ func MacroNewSeq(
 			})
 			// TODO refactor
 			if ident.Name != "Get" && ident.Name != "Reduce" {
+				var funcType *ast.FuncType
+				// handle func lit and functions
+				switch fn := callArgs[i][0].(type) {
+				case *ast.FuncLit:
+					funcType = fn.Type
+				case *ast.Ident:
+					if funcDecl, ok := fn.Obj.Decl.(*ast.FuncDecl); ok {
+						funcType = funcDecl.Type
+					} else {
+						fmt.Printf("Seq macro expected FuncDecl got func type %T\n", fn)
+						return false
+
+					}
+				default:
+					fmt.Printf("Seq macro unhandled func type %T\n", fn)
+					return false
+				}
 				var resultTyp ast.Expr
 				if ident.Name == "Map" {
-					resultTyp = funcLit.Type.Results.List[0].Type
+					resultTyp = funcType.Results.List[0].Type
 				} else if ident.Name == "Filter" {
-					resultTyp = funcLit.Type.Params.List[0].Type
+					resultTyp = funcType.Params.List[0].Type
 				}
 				arrType := &ast.ArrayType{
 					Elt: resultTyp,

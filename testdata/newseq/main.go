@@ -14,7 +14,7 @@ func main() {
 	macro.NewSeq_μ(fseq).
 		Map(func(v float64) float64 { return v + 1 }).
 		Filter(func(v float64) bool { return v < 300 }).
-		Map(func(v float64) string { return strconv.Itoa(int(v)) }).
+		Map(ftoa).
 		Map(func(v string) styp { return styp{len(v)} }).
 		Get(&out)
 	fmt.Println("")
@@ -27,4 +27,8 @@ func main() {
 		Reduce(&totalEvens, func(acc, v int) int { return acc + v })
 	fmt.Printf("Test NewSeq Reduce %+v\n", totalEvens)
 
+}
+
+func ftoa(v float64) string {
+	return strconv.Itoa(int(v))
 }

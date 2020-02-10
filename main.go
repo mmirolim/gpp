@@ -131,7 +131,9 @@ func parseDir(dir string) error {
 
 	macroPkg, ok := pkgs[0].Imports[macro.MacroPkgPath]
 	if !ok {
-		return errors.New("macro lib missing")
+		fmt.Println("no macro found")
+		// return nothing to do
+		return nil
 	}
 	for _, file := range macroPkg.Syntax {
 		macro.AllMacroDecl(file, macro.MacroDecl)

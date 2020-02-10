@@ -74,7 +74,16 @@ err=<nil>
 `,
 			err: nil,
 		},
+		// 		{
+		// 			desc:    "Test Example application",
+		// 			testDir: filepath.Join(testDir, "example"),
+		// 			output: `
+		// TODO DEFINE
+		// `,
+		// 			err: nil,
+		// 		},
 	}
+
 	var buf bytes.Buffer
 	for i, tc := range cases {
 		buf.Reset()
