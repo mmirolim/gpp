@@ -22,19 +22,24 @@ const (
 	macrosymbol = "_μ"
 	seq_μType   = "seq_μ"
 	try_μ       = "try_μ"
+	log_μ       = "log_μ"
 )
 
 var (
 	dst = flag.String("C", ".", "working directory")
 	src = "/dev/shm/gm"
 	// define custom macro expand functions
-	// TODO make settable
+	// TODO make settable, prefixed by modulename?
 	macroExpanders = map[string]MacroExpander{
 		seq_μType: MacroNewSeq,
 		try_μ:     macroTryExpand,
+		log_μ:     macroLogExpand,
 	}
 )
 
+// Test macros as library
+// Test parsing whole application
+// go run/build
 func main() {
 	flag.Parse()
 	fmt.Printf("%+v\n", "go macro experiment") // output for debug
@@ -77,6 +82,7 @@ var macroMethods map[string]*ast.FuncDecl
 
 func parseDir(dir string) error {
 	fset := token.NewFileSet()
+
 	pkgs, err := parser.ParseDir(fset, dir, nil, 0)
 	if err != nil {
 		return err
@@ -91,9 +97,10 @@ func parseDir(dir string) error {
 		break
 	}
 	macroMethods = allMacroMethods(file)
-
-	out := astutil.Apply(file, pre, post)
 	applyState.isOuterMacro = false
+	applyState.file = file
+	applyState.fset = fset
+	out := astutil.Apply(file, pre, post)
 	astStr, err := FormatNode(out)
 	if err != nil {
 		return err
@@ -143,6 +150,8 @@ func allMacroMethods(f *ast.File) map[string]*ast.FuncDecl {
 // TODO move to context?
 var applyState = struct {
 	isOuterMacro bool
+	file         *ast.File
+	fset         *token.FileSet
 }{}
 
 func isMacroDecl(decl *ast.FuncDecl) bool {
@@ -466,6 +475,7 @@ func MacroNewSeq(
 				Name: fmt.Sprintf("%s%d", "seq", i-1),
 				Obj:  prevObj,
 			})
+			// TODO refactor
 			if ident.Name != "Get" && ident.Name != "Reduce" {
 				var resultTyp ast.Expr
 				if ident.Name == "Map" {
@@ -601,6 +611,7 @@ func macroGeneralExpand(
 // TODO gtr didn't find test to run for this function
 // Define rules to expand, like func signature, last lhs is err
 // which is checked and so on
+// TODO Wrap errors with callexpr names to be able to identify it
 func macroTryExpand(
 	cur *astutil.Cursor,
 	parentStmt ast.Stmt,
@@ -648,6 +659,61 @@ func macroTryExpand(
 	// expand body macros
 	astutil.Apply(callExpr, pre, post)
 
+	return true
+}
+
+func macroLogExpand(
+	cur *astutil.Cursor,
+	parentStmt ast.Stmt,
+	idents []*ast.Ident,
+	callArgs [][]ast.Expr,
+	pre astutil.ApplyFunc) bool {
+	if len(idents) > 0 && idents[0].Name != log_μ {
+		return false
+	}
+
+	if len(callArgs[0]) == 0 {
+		return false
+	}
+	// TODO expected that it important
+	// construct fmt.Printf()
+	fmtExpr := &ast.SelectorExpr{
+		X:   &ast.Ident{Name: "fmt"},
+		Sel: &ast.Ident{Name: "Printf"},
+	}
+	fileInfo := applyState.fset.File(idents[0].Pos())
+	fmtCfg := &ast.BasicLit{
+		Kind:  token.STRING,
+		Value: fmt.Sprintf("%s:%d\\n", fileInfo.Name(), fileInfo.Line(idents[0].Pos())),
+	}
+	var args []ast.Expr
+	args = append(args, fmtCfg)
+	for _, carg := range callArgs[0] {
+		switch v := carg.(type) {
+		case *ast.BasicLit:
+			fmtCfg.Value += "%v\\n"
+		case *ast.Ident:
+			fmtCfg.Value += fmt.Sprintf("%s=%%#v\\n", v.Name)
+		case *ast.CallExpr:
+			callName, err := fnNameFromCallExpr(v)
+			if err == nil {
+				fmtCfg.Value += fmt.Sprintf("%v=%%#v\\n", callName)
+			} else {
+				fmtCfg.Value += fmt.Sprintf("%T=%%#v\\n", v)
+			}
+		default:
+			// define type of unknown
+			fmtCfg.Value += fmt.Sprintf("%T=%%#v\\n", v)
+			continue
+		}
+		args = append(args, carg)
+	}
+	fmtCfg.Value = fmt.Sprintf("\"%s\"", fmtCfg.Value)
+	callExpr := createCallExpr(fmtExpr, args)
+	cur.InsertAfter(&ast.ExprStmt{X: callExpr})
+	// expand body macros
+	astutil.Apply(callExpr, pre, post)
+	cur.Delete()
 	return true
 }
 
