@@ -1,11 +1,11 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"io/ioutil"
 	"log"
 	"os"
@@ -14,6 +14,7 @@ import (
 
 	"github.com/mmirolim/gpp/macro"
 	"golang.org/x/tools/go/ast/astutil"
+	"golang.org/x/tools/go/packages"
 )
 
 var (
@@ -62,39 +63,92 @@ func main() {
 	}
 }
 
-var macroMethods map[string]*ast.FuncDecl
-
 func parseDir(dir string) error {
-	fset := token.NewFileSet()
-
-	pkgs, err := parser.ParseDir(fset, dir, nil, 0)
+	ctx := context.Background()
+	cfg := &packages.Config{
+		Context: ctx,
+		Dir:     dir,
+		Mode: packages.NeedName |
+			packages.NeedFiles |
+			packages.NeedSyntax |
+			packages.NeedTypes |
+			packages.NeedImports |
+			packages.NeedDeps,
+		Tests: true,
+	}
+	var err error
+	var pkgs []*packages.Package
+	// find all packages
+	pkgs, err = packages.Load(cfg, "./...")
 	if err != nil {
 		return err
 	}
 
-	var file *ast.File
-	var fileName string
-	// TODO process all files
-	for fname := range pkgs["main"].Files {
-		fileName = fname
-		file = pkgs["main"].Files[fname]
-		break
+	for i := range pkgs {
+		if len(pkgs[i].Errors) > 0 {
+			fmt.Fprintln(os.Stderr, "\n=======\033[31m Build Failed \033[39m=======")
+			select {
+			case <-ctx.Done():
+				fmt.Fprintln(os.Stderr, "task canceled")
+				err = errors.New("task canceled")
+				return err
+			default:
+			}
+			packages.PrintErrors(pkgs)
+			fmt.Fprintln(os.Stderr, "\n============================")
+			err = errors.New("packages.Load error")
+			return err
+		}
 	}
-	macroMethods = macro.AllMacroMethods(file)
-	state := &macro.ApplyState
-	state.IsOuterMacro = false
-	state.File = file
-	state.Fset = fset
-	out := astutil.Apply(file, pre, post)
-	astStr, err := macro.FormatNode(out)
-	if err != nil {
-		return err
+
+	macroPkg, ok := pkgs[0].Imports[macro.MacroPkgPath]
+	if !ok {
+		return errors.New("macro lib missing")
 	}
-	err = ioutil.WriteFile(fileName, []byte(astStr), 0700)
-	if err != nil {
-		return err
+	for _, file := range macroPkg.Syntax {
+		macro.AllMacroDecl(file, macro.MacroDecl)
 	}
-	return err
+
+	for _, pkg := range pkgs {
+		for i, file := range pkg.Syntax {
+			// remove macro import
+			removeMacroLibImport(file)
+			// remove comments
+			file.Comments = nil
+			macro.ApplyState.IsOuterMacro = false
+			macro.ApplyState.File = file
+			macro.ApplyState.Fset = pkg.Fset
+			modifiedAST := astutil.Apply(file, pre, post)
+			updatedFile := modifiedAST.(*ast.File)
+			astStr, err := macro.FormatNode(updatedFile)
+			if err != nil {
+				fmt.Printf("%+v\n", "format err") // output for debug
+				return err
+			}
+			err = ioutil.WriteFile(pkg.GoFiles[i], []byte(astStr), 0700)
+			if err != nil {
+				fmt.Printf("%+v\n", "write error") // output for debug
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func removeMacroLibImport(file *ast.File) {
+OUTER:
+	for _, decl := range file.Decls {
+		if genDecl, ok := decl.(*ast.GenDecl); ok {
+			for i := range genDecl.Specs {
+				if spec, ok := genDecl.Specs[i].(*ast.ImportSpec); ok {
+					if strings.Contains(spec.Path.Value, macro.MacroPkgPath) {
+						genDecl.Specs = append(genDecl.Specs[:i], genDecl.Specs[i+1:]...)
+						break OUTER
+					}
+				}
+			}
+		}
+	}
 }
 
 func pre(cur *astutil.Cursor) bool {
@@ -104,7 +158,6 @@ func pre(cur *astutil.Cursor) bool {
 		macro.ApplyState.IsOuterMacro = macro.IsMacroDecl(funDecl)
 	}
 	// process AssignStmt
-
 	if macro.ApplyState.IsOuterMacro {
 		return false
 	}
@@ -127,23 +180,46 @@ func pre(cur *astutil.Cursor) bool {
 		}
 
 	}
+
 	if callExpr == nil {
 		return true
 	}
 	// apply macro expand rules
 	var callArgs [][]ast.Expr
 	var idents []*ast.Ident
-
 	macro.IdentsFromCallExpr(&idents, &callArgs, callExpr)
+	// first ident
 	ident := idents[0]
-	if ident.Obj == nil || ident.Obj.Decl == nil {
-		return true
+	// skip lib prefix
+	if ident.Name == "macro" {
+		idents = idents[1:]
+		ident = idents[0]
 	}
+
+	if ident.Obj == nil || ident.Obj.Decl == nil {
+		// TODO define func
+		// check in macro decls
+		if strings.HasSuffix(ident.Name, macro.MacroSymbol) {
+			ident.Obj = &ast.Object{
+				Name: ident.Name,
+				Decl: macro.MacroDecl[ident.Name],
+			}
+		} else if ident.Name == "macro" {
+			name := fmt.Sprintf("%s.%s", ident.Name, idents[1].Name)
+			ident.Obj = &ast.Object{
+				Name: name,
+				Decl: macro.MacroDecl[name],
+			}
+		} else {
+			return true
+		}
+	}
+
 	macroTypeName := ""
 	if decl, ok := ident.Obj.Decl.(*ast.FuncDecl); ok {
 		// TODO construct for not only star expressions
 		// can be selector?
-		if decl.Type.Results != nil && decl.Type.Results.List[0] != nil {
+		if decl != nil && decl.Type.Results != nil && decl.Type.Results.List[0] != nil {
 			expr, ok := decl.Type.Results.List[0].Type.(*ast.StarExpr)
 			if ok {
 				//  TODO use recursive solution
@@ -154,7 +230,6 @@ func pre(cur *astutil.Cursor) bool {
 			}
 		}
 	}
-
 	// get expand func
 	if expand, ok := macro.MacroExpanders[macroTypeName]; ok {
 		expand(cur, parentStmt, idents, callArgs, pre, post)

@@ -127,7 +127,7 @@ func TestFnNameFromCallExpr(t *testing.T) {
 	}
 	// TODO add cases with closures()().Method and arr[i].Param.Method calls
 	for i, tc := range cases {
-		fnName, err := fnNameFromCallExpr(tc.callExpr)
+		fnName, err := FnNameFromCallExpr(tc.callExpr)
 		if isUnexpectedErr(t, i, tc.output, tc.err, err) {
 			continue
 		}

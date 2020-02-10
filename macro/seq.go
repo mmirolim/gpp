@@ -105,9 +105,10 @@ func MacroNewSeq(
 		// by unexported field?
 		var funDecl *ast.FuncDecl
 		if ident.Obj == nil {
-			funDecl = MacroMethods[fmt.Sprintf("%s.%s", Seq_μTypeSymbol, ident.Name)]
+			name := fmt.Sprintf("%s.%s", Seq_μTypeSymbol, ident.Name)
+			funDecl = MacroDecl[name]
 			if funDecl == nil {
-				fmt.Printf("WARN Method Decl not found %+v\n", ident.Name) // output for debug
+				fmt.Printf("WARN Method Decl not found %+v\n", name) // output for debug
 
 				continue
 			}

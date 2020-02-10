@@ -62,13 +62,13 @@ Test NewSeq Reduce 12
 			desc:    "Test log_μ",
 			testDir: filepath.Join(testDir, "log"),
 			output: `
-/tmp/gm-test-macro/testdata/log/main.go:12
+/tmp/gm-test-macro/testdata/log/main.go:14
 result before
 result=0
-/tmp/gm-test-macro/testdata/log/main.go:14
+/tmp/gm-test-macro/testdata/log/main.go:16
 result after
 result=10
-/tmp/gm-test-macro/testdata/log/main.go:17
+/tmp/gm-test-macro/testdata/log/main.go:19
 try err
 err=<nil>
 `,
@@ -91,6 +91,7 @@ err=<nil>
 		if err != nil {
 			log.Fatalf("go run error %+v\n%s", err, output)
 		}
+
 		if output != tc.output {
 			t.Errorf("case [%d] %s\nexpected %s, got %s", i, tc.desc, tc.output, output)
 		}

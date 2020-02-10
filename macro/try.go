@@ -22,7 +22,7 @@ func MacroTryExpand(
 	idents []*ast.Ident,
 	callArgs [][]ast.Expr,
 	pre, post astutil.ApplyFunc) bool {
-	if len(idents) > 0 && idents[0].Name != Try_μSymbol {
+	if !checkIsMacroIdent(Try_μSymbol, idents) {
 		return false
 	}
 
@@ -60,7 +60,7 @@ func MacroTryExpand(
 
 			// replace with err
 			assignStmt.Lhs[len(assignStmt.Lhs)-1] = errIdent
-			callName, _ := fnNameFromCallExpr(cexp)
+			callName, _ := FnNameFromCallExpr(cexp)
 			fmtCfg := &ast.BasicLit{
 				Kind:  token.STRING,
 				Value: fmt.Sprintf("\"%s: %%w\"", callName),

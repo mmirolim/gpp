@@ -18,6 +18,7 @@ const (
 	Seq_μTypeSymbol = "seq_μ"
 	Try_μSymbol     = "Try_μ"
 	Log_μSymbol     = "Log_μ"
+	MacroPkgPath    = "github.com/mmirolim/gpp/macro"
 )
 
 // TODO move to context?
@@ -33,9 +34,13 @@ var MacroExpanders = map[string]MacroExpander{
 	Seq_μTypeSymbol: MacroNewSeq,
 	Try_μSymbol:     MacroTryExpand,
 	Log_μSymbol:     MacroLogExpand,
+	// TODO change to package path
+	"macro." + Seq_μTypeSymbol: MacroNewSeq,
+	"macro." + Try_μSymbol:     MacroTryExpand,
+	"macro." + Log_μSymbol:     MacroLogExpand,
 }
 
-var MacroMethods = map[string]*ast.FuncDecl{}
+var MacroDecl = map[string]*ast.FuncDecl{}
 
 type MacroExpander func(cur *astutil.Cursor,
 	parentStmt ast.Stmt,
@@ -79,6 +84,44 @@ func AllMacroMethods(f *ast.File) map[string]*ast.FuncDecl {
 	return methods
 }
 
+func AllMacroDecl(f *ast.File, allMacroDecl map[string]*ast.FuncDecl) {
+	for _, decl := range f.Decls {
+		fnDecl, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if fnDecl.Recv == nil {
+			if strings.HasSuffix(fnDecl.Name.Name, MacroSymbol) {
+				allMacroDecl[fmt.Sprintf("%s.%s", f.Name, fnDecl.Name.Name)] = fnDecl
+				// load without lib prefix
+				allMacroDecl[fnDecl.Name.Name] = fnDecl
+			}
+			continue
+		}
+		typeName := ""
+		// method
+		switch v := fnDecl.Recv.List[0].Type.(type) {
+		case *ast.Ident:
+			typeName = v.Name
+		case *ast.StarExpr:
+			ident, ok := v.X.(*ast.Ident)
+			if ok {
+				typeName = ident.Name
+			} else {
+				log.Fatalf("unexpected ast type %T", v.X)
+			}
+
+		default:
+			log.Fatalf("[WARN] unhandled method reciver case %T\n", v)
+
+		}
+		if strings.HasSuffix(typeName, MacroSymbol) {
+			allMacroDecl[fmt.Sprintf("%s.%s.%s", f.Name, typeName, fnDecl.Name.Name)] = fnDecl
+			allMacroDecl[fmt.Sprintf("%s.%s", typeName, fnDecl.Name.Name)] = fnDecl
+		}
+	}
+}
+
 func createCallExpr(fun ast.Expr, args []ast.Expr) *ast.CallExpr {
 	expr := &ast.CallExpr{
 		Fun:  fun,
@@ -113,7 +156,7 @@ func createAssignStmt(lhs, rhs []ast.Expr, tok token.Token) *ast.AssignStmt {
 // fnNameFromCallExpr returns name of func/method call
 // from ast.CallExpr
 // TODO test with closure()().Method and arr[i].Param.Method calls
-func fnNameFromCallExpr(fn *ast.CallExpr) (string, error) {
+func FnNameFromCallExpr(fn *ast.CallExpr) (string, error) {
 	var err error
 	var fname string
 	var combineName func(*ast.SelectorExpr) (string, error)
@@ -127,7 +170,7 @@ func fnNameFromCallExpr(fn *ast.CallExpr) (string, error) {
 			fname, err := combineName(v)
 			return fname + "." + expr.Sel.Name, err
 		case *ast.CallExpr:
-			fname, err := fnNameFromCallExpr(v)
+			fname, err := FnNameFromCallExpr(v)
 			return fname + "." + expr.Sel.Name, err
 		default:
 			fmt.Printf("combine: unexpected AST %# v\n", pretty.Formatter(v)) // output for debug
@@ -291,6 +334,19 @@ func IsMacroDecl(decl *ast.FuncDecl) bool {
 	}
 
 	return strings.HasSuffix(typeName, MacroSymbol)
+}
+
+func checkIsMacroIdent(name string, idents []*ast.Ident) bool {
+	if len(idents) == 0 {
+		return false
+	}
+	// check if it's log macro
+	if (idents[0].Name == "macro" && idents[1].Name == name) ||
+		idents[0].Name == name {
+		return true
+
+	}
+	return false
 }
 
 func FormatNode(node ast.Node) (string, error) {

@@ -17,10 +17,9 @@ func MacroLogExpand(
 	idents []*ast.Ident,
 	callArgs [][]ast.Expr,
 	pre, post astutil.ApplyFunc) bool {
-	if len(idents) > 0 && idents[0].Name != Log_μSymbol {
+	if !checkIsMacroIdent(Log_μSymbol, idents) {
 		return false
 	}
-
 	if len(callArgs[0]) == 0 {
 		return false
 	}
@@ -30,7 +29,8 @@ func MacroLogExpand(
 		X:   &ast.Ident{Name: "fmt"},
 		Sel: &ast.Ident{Name: "Printf"},
 	}
-	fileInfo := ApplyState.Fset.File(idents[0].Pos())
+	pos := idents[0].Pos()
+	fileInfo := ApplyState.Fset.File(pos)
 	fmtCfg := &ast.BasicLit{
 		Kind:  token.STRING,
 		Value: fmt.Sprintf("%s:%d\\n", fileInfo.Name(), fileInfo.Line(idents[0].Pos())),
@@ -44,7 +44,7 @@ func MacroLogExpand(
 		case *ast.Ident:
 			fmtCfg.Value += fmt.Sprintf("%s=%%#v\\n", v.Name)
 		case *ast.CallExpr:
-			callName, err := fnNameFromCallExpr(v)
+			callName, err := FnNameFromCallExpr(v)
 			if err == nil {
 				fmtCfg.Value += fmt.Sprintf("%v=%%#v\\n", callName)
 			} else {
