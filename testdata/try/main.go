@@ -3,12 +3,14 @@ package main
 import (
 	"errors"
 	"fmt"
+
+	"github.com/mmirolim/gpp/macro"
 )
 
 func main() {
 	var result int
 	// failed on fPtrIntError
-	err := try_μ(func() error {
+	err := macro.Try_μ(func() error {
 		fname, _ := fStrError(false)
 		// should return here
 		_, result, _ = fPtrIntError(true)
@@ -19,7 +21,7 @@ func main() {
 	})
 	fmt.Println("")
 	fmt.Printf("(result, err) = (%d, %+v)\n", result, err)
-	err = try_μ(func() error {
+	err = macro.Try_μ(func() error {
 		_, _ = fStrError(false)
 		_, result, _ = fPtrIntError(false)
 		fErr(false)
@@ -27,10 +29,6 @@ func main() {
 		return nil
 	})
 	fmt.Printf("(result, err) = (%d, %+v)\n", result, err)
-}
-
-func try_μ(fn interface{}) error {
-	return nil
 }
 
 func fStrError(toError bool) (string, error) {
