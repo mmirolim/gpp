@@ -18,14 +18,20 @@ func main() {
 		Map(func(v string) styp { return styp{len(v)} }).
 		Ret(&out)
 	fmt.Println("")
-	fmt.Printf("Test NewSeq Map/Filter %+v\n", out)
+	fmt.Printf("NewSeq Map/Filter %+v\n", out)
 
 	seq := []int{1, 2, 3, 4, 5, 6}
 	var totalEvens int
+	totalProduct := 1
+	var res []int
 	macro.NewSeq_μ(seq).
 		Filter(func(v int) bool { return v%2 == 0 }).
-		Reduce(&totalEvens, func(acc, v int) int { return acc + v })
-	fmt.Printf("Test NewSeq Reduce %+v\n", totalEvens)
+		Reduce(&totalEvens, func(acc, v int) int { return acc + v }).
+		Reduce(&totalProduct, func(acc, v int) int { return acc * v }).
+		Filter(func(v int) bool { return v == 2 }).
+		Ret(&res)
+
+	fmt.Printf("NewSeq res %d sum even %+v mult even %d\n", res, totalEvens, totalProduct)
 
 }
 

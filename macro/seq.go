@@ -23,13 +23,12 @@ func NewSeq_μ(src interface{}) *seq_μ {
 	return &seq_μ{seq0}
 }
 
-func (seq *seq_μ) Ret(out interface{}) *seq_μ {
+func (seq *seq_μ) Ret(out interface{}) {
 	output := &[]_T{}
 	res := []_T{}
 	for i := range res {
 		*output = append(*output, res[i])
 	}
-	return seq
 }
 
 func (seq *seq_μ) Filter(fn interface{}) *seq_μ {
@@ -133,7 +132,7 @@ func MacroNewSeq(
 
 			// assign ident to input
 			callArgs[i] = append(callArgs[i], &ast.Ident{
-				Name: fmt.Sprintf("%s%d", "seq", i-1),
+				Name: fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)-1),
 				Obj:  prevObj,
 			})
 			// TODO refactor
@@ -161,22 +160,25 @@ func MacroNewSeq(
 				} else if ident.Name == "Filter" {
 					resultTyp = funcType.Params.List[0].Type
 				}
-				arrType := &ast.ArrayType{
-					Elt: resultTyp,
-				}
-				lastNewSeqStmt, lastNewSeqSeq = newDeclStmt(
-					token.VAR, fmt.Sprintf("%s%d", "seq", i),
-					arrType)
-				newSeqBlocks = append(newSeqBlocks, lastNewSeqStmt)
+				// reduce does not modify sequence
+				if ident.Name != "Reduce" {
+					arrType := &ast.ArrayType{
+						Elt: resultTyp,
+					}
+					lastNewSeqStmt, lastNewSeqSeq = newDeclStmt(
+						token.VAR, fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)),
+						arrType)
+					newSeqBlocks = append(newSeqBlocks, lastNewSeqStmt)
 
-				// assing unary op to output
-				callArgs[i] = append(callArgs[i], &ast.UnaryExpr{
-					Op: token.AND,
-					X: &ast.Ident{
-						Name: fmt.Sprintf("%s%d", "seq", i),
-						Obj:  lastNewSeqSeq.Obj,
-					},
-				})
+					// assing unary op to output
+					callArgs[i] = append(callArgs[i], &ast.UnaryExpr{
+						Op: token.AND,
+						X: &ast.Ident{
+							Name: fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)-1),
+							Obj:  lastNewSeqSeq.Obj,
+						},
+					})
+				}
 			}
 		}
 		body := copyBodyStmt(len(callArgs[i]),
