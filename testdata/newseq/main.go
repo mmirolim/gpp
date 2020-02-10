@@ -16,7 +16,7 @@ func main() {
 		Filter(func(v float64) bool { return v < 300 }).
 		Map(ftoa).
 		Map(func(v string) styp { return styp{len(v)} }).
-		Get(&out)
+		Ret(&out)
 	fmt.Println("")
 	fmt.Printf("Test NewSeq Map/Filter %+v\n", out)
 

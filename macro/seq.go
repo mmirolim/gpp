@@ -23,7 +23,7 @@ func NewSeq_μ(src interface{}) *seq_μ {
 	return &seq_μ{seq0}
 }
 
-func (seq *seq_μ) Get(out interface{}) *seq_μ {
+func (seq *seq_μ) Ret(out interface{}) *seq_μ {
 	output := &[]_T{}
 	res := []_T{}
 	for i := range res {
@@ -137,7 +137,7 @@ func MacroNewSeq(
 				Obj:  prevObj,
 			})
 			// TODO refactor
-			if ident.Name != "Get" && ident.Name != "Reduce" {
+			if ident.Name != "Ret" && ident.Name != "Reduce" {
 				var funcType *ast.FuncType
 				// handle func lit and functions
 				switch fn := callArgs[i][0].(type) {
