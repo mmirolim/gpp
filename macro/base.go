@@ -26,6 +26,7 @@ var ApplyState = struct {
 	IsOuterMacro bool
 	File         *ast.File
 	Fset         *token.FileSet
+	SrcDir       string
 }{}
 
 // define custom macro expand functions

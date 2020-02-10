@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"strings"
 
 	"golang.org/x/tools/go/ast/astutil"
 )
@@ -32,8 +33,10 @@ func MacroLogExpand(
 	pos := idents[0].Pos()
 	fileInfo := ApplyState.Fset.File(pos)
 	fmtCfg := &ast.BasicLit{
-		Kind:  token.STRING,
-		Value: fmt.Sprintf("%s:%d\\n", fileInfo.Name(), fileInfo.Line(idents[0].Pos())),
+		Kind: token.STRING,
+		Value: fmt.Sprintf("%s:%d\\n",
+			strings.TrimPrefix(fileInfo.Name(), ApplyState.SrcDir),
+			fileInfo.Line(idents[0].Pos())),
 	}
 	var args []ast.Expr
 	args = append(args, fmtCfg)

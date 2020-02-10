@@ -146,6 +146,7 @@ func parseDir(dir string) error {
 			macro.ApplyState.IsOuterMacro = false
 			macro.ApplyState.File = file
 			macro.ApplyState.Fset = pkg.Fset
+			macro.ApplyState.SrcDir = src
 			modifiedAST := astutil.Apply(file, pre, post)
 			updatedFile := modifiedAST.(*ast.File)
 			astStr, err := macro.FormatNode(updatedFile)
