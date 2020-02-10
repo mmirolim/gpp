@@ -1,4 +1,4 @@
-module github.com/mmirolim/gm
+module github.com/mmirolim/gpp
 
 go 1.13
 
