@@ -62,15 +62,9 @@ Test NewSeq Reduce 12
 			desc:    "Test log_μ",
 			testDir: filepath.Join(testDir, "log"),
 			output: `
-/tmp/gm-test-macro/testdata/log/main.go:14
-result before
-result=0
-/tmp/gm-test-macro/testdata/log/main.go:16
-result after
-result=10
-/tmp/gm-test-macro/testdata/log/main.go:19
-try err
-err=<nil>
+/tmp/gm-test-macro/testdata/log/main.go:14 result before result=0
+/tmp/gm-test-macro/testdata/log/main.go:16 result after result=10
+/tmp/gm-test-macro/testdata/log/main.go:19 try err err=<nil>
 `,
 			err: nil,
 		},
