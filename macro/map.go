@@ -18,6 +18,15 @@ func MapVals_μ(vals, m interface{}) {
 	}
 }
 
+func MapToSlice_μ(sl, m, f interface{}) {
+	slice := &[]interface{}{}
+	dic := map[_T]_G{}
+	proc := (func(_T, _G) _T)(nil)
+	for k, v := range dic {
+		*slice = append(*slice, proc(k, v))
+	}
+}
+
 func PrintMap_μ(m interface{}) {
 	arg2 := map[_T]_G{}
 	PrintMapf_μ("%v : %v\n", arg2)

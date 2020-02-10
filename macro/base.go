@@ -50,6 +50,13 @@ type MacroExpander func(cur *astutil.Cursor,
 	pre, post astutil.ApplyFunc,
 ) bool
 
+func PrintSlice_μ(sl interface{}) {
+	arg1 := []_T{}
+	for i := range arg1 {
+		fmt.Printf("%v\n", arg1[i]) // output for debug
+	}
+}
+
 // TODO should resolve across packages
 func AllMacroMethods(f *ast.File) map[string]*ast.FuncDecl {
 	methods := make(map[string]*ast.FuncDecl)
