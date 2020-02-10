@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/mmirolim/gpp/macro"
@@ -18,8 +19,9 @@ import (
 )
 
 var (
-	dst = flag.String("C", ".", "working directory")
-	src = "/dev/shm/gm"
+	dst     = flag.String("C", ".", "working directory")
+	src     = filepath.Join(os.TempDir(), "gpp_temp_build_dir")
+	runFlag = flag.Bool("run", false, "build run binary")
 )
 
 // Test macros as library
@@ -27,39 +29,65 @@ var (
 // go run/build
 func main() {
 	flag.Parse()
-	fmt.Printf("%+v\n", "go macro experiment") // output for debug
 	// parse file
 	// generate correct AST to insert
 	// pass to compiler
-
-	// clean prev directory
-	err := os.RemoveAll(src)
+	curDir, err := os.Getwd()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("getwd error %+v", err)
+	}
+	base := filepath.Base(curDir)
+	src := filepath.Join(src, base)
+	// clean prev directory
+	err = os.RemoveAll(src)
+	if err != nil {
+		log.Fatalf("remove all error %+v", err)
+	}
+	err = os.MkdirAll(src, 0700)
+	if err != nil {
+		log.Fatalf("mkdir all error %+v", err)
 	}
 	// copy whole directory to /dev/shm
-	fmt.Printf("%+v\n", "copy to tmp dir") // output for debug
 	cmd := exec.Command("cp", "-r", *dst, src)
 	err = cmd.Run()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("cp -r error %+v", err)
 	}
 	// change dir
 	err = os.Chdir(src)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("chdir %+v", err)
 	}
-
 	err = parseDir(src)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("parse dir error %+v", err)
 	}
-
 	// go build
 	cmd = exec.Command("go", "build")
 	err = cmd.Run()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("go build error %+v", err)
+	}
+
+	err = os.Chdir(curDir)
+	if err != nil {
+		log.Fatalf("chdir %+v", err)
+	}
+	// copy binary back
+	cmd = exec.Command("cp", filepath.Join(src, base), base)
+	err = cmd.Run()
+	if err != nil {
+		log.Fatalf("cp error %+v", err)
+	}
+	if *runFlag {
+		// TODO pass flags
+		cmd = exec.Command("./" + base)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err = cmd.Run()
+		if err != nil {
+			log.Fatalf("binary exec error %+v", err)
+		}
 	}
 }
 
