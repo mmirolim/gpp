@@ -18,7 +18,7 @@ func main() {
 		return nil
 	})
 	fmt.Println("")
-	fmt.Printf("Expect (result, err) (0, fPtrIntError error), got (%d, %+v)\n", result, err)
+	fmt.Printf("(result, err) = (%d, %+v)\n", result, err)
 	err = try_μ(func() error {
 		_, _ = fStrError(false)
 		_, result, _ = fPtrIntError(false)
@@ -26,7 +26,7 @@ func main() {
 		// should return here
 		return nil
 	})
-	fmt.Printf("Expect (result, err) (1, <nil>), got (%d, %+v)\n", result, err)
+	fmt.Printf("(result, err) = (%d, %+v)\n", result, err)
 }
 
 func try_μ(fn interface{}) error {

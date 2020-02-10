@@ -55,8 +55,8 @@ Test NewSeq Reduce 12
 			desc:    "Test try_μ",
 			testDir: filepath.Join(testDir, "try"),
 			output: `
-Expect (result, err) (0, fPtrIntError error), got (0, fPtrIntError error)
-Expect (result, err) (1, <nil>), got (1, <nil>)
+(result, err) = (0, fPtrIntError: fPtrIntError error)
+(result, err) = (1, <nil>)
 `,
 			err: nil,
 		},
@@ -77,7 +77,6 @@ err=<nil>
 			err: nil,
 		},
 	}
-
 	var buf bytes.Buffer
 	for i, tc := range cases {
 		buf.Reset()

@@ -641,16 +641,32 @@ func macroTryExpand(
 	for _, stmt := range funcLit.Body.List {
 		bodyList = append(bodyList, stmt)
 		// only assignment handled
-		// expr stmt difficult to resolve during parsing what does it return
+		// expr stmt problem to resolve during parsing what it returns
 		if assignStmt, ok := stmt.(*ast.AssignStmt); ok {
 			// expect last unused variable to be an error
 			lastVar := assignStmt.Lhs[len(assignStmt.Lhs)-1].(*ast.Ident)
 			if lastVar.Name != "_" {
 				continue
 			}
+			// check is callExpr
+			var cexp *ast.CallExpr
+			if cexp, ok = assignStmt.Rhs[0].(*ast.CallExpr); !ok {
+				continue
+			}
+
 			// replace with err
 			assignStmt.Lhs[len(assignStmt.Lhs)-1] = errIdent
-			bodyList = append(bodyList, createIfErrRetStmt(errIdent))
+			callName, _ := fnNameFromCallExpr(cexp)
+			fmtCfg := &ast.BasicLit{
+				Kind:  token.STRING,
+				Value: fmt.Sprintf("\"%s: %%w\"", callName),
+			}
+			fmtExpr := &ast.SelectorExpr{
+				X:   &ast.Ident{Name: "fmt"},
+				Sel: &ast.Ident{Name: "Errorf"},
+			}
+			callExpr := createCallExpr(fmtExpr, []ast.Expr{fmtCfg, errIdent})
+			bodyList = append(bodyList, createIfErrRetStmt(errIdent, callExpr))
 		}
 	}
 	funcLit.Body.List = bodyList
@@ -730,7 +746,7 @@ func createCallExpr(fun ast.Expr, args []ast.Expr) *ast.CallExpr {
 	return expr
 }
 
-func createIfErrRetStmt(err ast.Expr) *ast.IfStmt {
+func createIfErrRetStmt(err ast.Expr, ret ast.Expr) *ast.IfStmt {
 	stmt := &ast.IfStmt{
 		Cond: &ast.BinaryExpr{
 			X: err, Op: token.NEQ, Y: &ast.Ident{Name: "nil"},
@@ -738,7 +754,7 @@ func createIfErrRetStmt(err ast.Expr) *ast.IfStmt {
 		Body: &ast.BlockStmt{
 			List: []ast.Stmt{
 				&ast.ReturnStmt{
-					Results: []ast.Expr{err},
+					Results: []ast.Expr{ret},
 				},
 			},
 		},
