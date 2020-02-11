@@ -5,6 +5,11 @@ go:
 
 before_install:
   - go mod download
+  - go get -u github.com/kr/pretty
+  - go get -u github.com/BurntSushi/ty
+  - go get -u github.com/BurntSushi/ty/fun
+  - go get -u golang.org/x/tools/go/ast/astutil
+  - go get -u golang.org/x/tools/go/packages
 
 script:
   # run tests on a standard platform
