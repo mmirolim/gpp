@@ -5,7 +5,7 @@
 
 # Gpp - go preprocessor (AST hacking experiment)
 
-Until everyone waits for Go 2.0 and Generics let’s sprinkle some sugar with “macros”. Gpp is macro preprocessor and library. Expansion all identified macros is done before calling go build/run. Macros defined in macro library have a signature of regular functions and defined as AST mutation function in go so there is no new syntax to learn. There are currently Log_μ, Try_μ and Map/Filter/Reduce macros defined. Benefits of AST macros are defining DSLs, simulate type parametric functions and extend the language without losing compile-time type safety, code bloat with code generation and without using slow/inconvenient reflection or unsafe packages.
+Until everyone waits for Go 2.0 and Generics let’s sprinkle some sugar with “macros”. Gpp is macro preprocessor and library. Expansion of all identified macros is done before calling go build/run. Macros defined in macro library have a signature of regular functions and defined as AST mutation function in go code so there is no new syntax to learn. There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefits of AST macros are defining DSLs, simulate type parametric functions and extend the language without losing compile-time type safety, code bloat with code generation and without using slow/inconvenient reflection or unsafe packages.
 	
 ## Examples
 
@@ -78,7 +78,8 @@ Until everyone waits for Go 2.0 and Generics let’s sprinkle some sugar with �
 		Filter(func(v int) bool { return v%2 == 0 }).
 		Reduce(&sumOfEvens, func(acc, v, i int) int { return acc + v }).
   ```
-
+  Other macros MapKeys_μ, MapVals_μ, MapToSlice_μ, PrintMapKeys_μ, PrintMap_μ, PrintSlice_μ
+  
 ## Edge cases
 
 - Early prototype
@@ -88,14 +89,38 @@ Until everyone waits for Go 2.0 and Generics let’s sprinkle some sugar with �
 - Macro functions should be directly used without assignment or any indirection
 - Needs more extensive testing
 
-# Installation
+## Benchmarks
+
+	```go
+	func BenchmarkNewSeqMacro(b *testing.B) {
+	fseq := []float64{100, 200, 300, 400, 500, 600}
+	type styp struct{ strLen int }
+	var out []styp
+	for i := 0; i < b.N; i++ {
+		out = out[:0]
+		macro.NewSeq_μ(fseq).Map(func(v float64) float64 { return v + 1 }).
+			Filter(func(v float64) bool { return v < 300 }).
+			Map(ftoa).
+			Map(func(v string, i int) styp { return styp{len(v) + i} }).
+			Ret(&out)
+		}
+	}
+	```
+
+	goos: linux
+	goarch: amd64
+	BenchmarkNewSeqMacro-8             	 2528289	       463 ns/op
+	BenchmarkNewSeqOpsHandWritten-8    	 3042022	       395 ns/op
+	BenchmarkNewSeqOpsByReflection-8   	  125785	      9479 ns/op
+
+## Installation
 	
  gpp requires to go command to be available
 	
 	go get -u github.com/mmirolim/gpp
 
 	
-# Usage
+## Usage
 	
  Run in the project directory
 
