@@ -280,7 +280,9 @@ func IdentsFromCallExpr(idents *[]*ast.Ident, callArgs *[][]ast.Expr, expr *ast.
 		}
 		*idents = append(*idents, v.Sel)
 	default:
-		log.Fatalf("default unsupported type %T\n", v)
+		// TODO indexes, indirections
+		fmt.Printf("WARN IdentsFromCallExpr unsuported type %T\n", v) // output for debug
+		return
 	}
 	*callArgs = append(*callArgs, expr.Args)
 }

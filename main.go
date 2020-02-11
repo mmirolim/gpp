@@ -221,6 +221,10 @@ func pre(cur *astutil.Cursor) bool {
 	var callArgs [][]ast.Expr
 	var idents []*ast.Ident
 	macro.IdentsFromCallExpr(&idents, &callArgs, callExpr)
+	if len(idents) == 0 {
+		// skip unhandled cases
+		return true
+	}
 	// first ident
 	ident := idents[0]
 	// skip lib prefix
