@@ -137,12 +137,12 @@ func MacroNewSeq(
 			var funcType *ast.FuncType
 			if ident.Name != "Ret" {
 				// handle func lit and functions
-				fnId := 0
+				fnID := 0
 				if ident.Name == "Reduce" {
-					fnId = 1
+					fnID = 1
 				}
 				var funLit *ast.FuncLit
-				switch fn := callArgs[i][fnId].(type) {
+				switch fn := callArgs[i][fnID].(type) {
 				case *ast.FuncLit:
 					funcType = fn.Type
 				case *ast.Ident:
@@ -180,7 +180,7 @@ func MacroNewSeq(
 						})
 					if funLit != nil {
 						// swap call argument if we wrapped func
-						callArgs[i][fnId] = funLit
+						callArgs[i][fnID] = funLit
 					}
 				}
 
