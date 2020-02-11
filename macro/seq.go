@@ -12,9 +12,9 @@ import (
 
 type seq_μ []_T
 
-type _RF func(_T, _T) _T
-type _PF func(_T) bool
-type _MF func(_T) _T
+type _RF func(_T, _T, int) _T
+type _PF func(_T, int) bool
+type _MF func(_T, int) _T
 type _T interface{}
 type _G interface{}
 
@@ -60,7 +60,7 @@ func Filter_μ(in, out, fn interface{}) {
 	res := &([]_T{})
 	pred := (_PF)(nil)
 	for i, v := range input {
-		if pred(v) {
+		if pred(v, i) {
 			*res = append(*res, input[i])
 		}
 	}
@@ -71,7 +71,7 @@ func Map_μ(in, out, fn interface{}) {
 	res := &([]_T{})
 	fun := (_MF)(nil)
 	for i := range input {
-		*res = append(*res, fun(input[i]))
+		*res = append(*res, fun(input[i], i))
 	}
 }
 
@@ -80,7 +80,7 @@ func Reduce_μ(in, out, fn interface{}) {
 	accum := (*_T)(nil)
 	fun := (_RF)(nil)
 	for i := range input {
-		*accum = fun(*accum, input[i])
+		*accum = fun(*accum, input[i], i)
 	}
 }
 
@@ -107,11 +107,9 @@ func MacroNewSeq(
 			name := fmt.Sprintf("%s.%s", Seq_μTypeSymbol, ident.Name)
 			funDecl = MacroDecl[name]
 			if funDecl == nil {
-				fmt.Printf("WARN Method Decl not found %+v\n", name) // output for debug
-
+				fmt.Printf("WARN Method Decl not found %+v\n", name)
 				continue
 			}
-
 		} else {
 			var ok bool
 			funDecl, ok = ident.Obj.Decl.(*ast.FuncDecl)
@@ -135,50 +133,76 @@ func MacroNewSeq(
 				Name: fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)-1),
 				Obj:  prevObj,
 			})
-			// TODO refactor
-			if ident.Name != "Ret" && ident.Name != "Reduce" {
-				var funcType *ast.FuncType
+			var funcType *ast.FuncType
+			if ident.Name != "Ret" { //}&& ident.Name != "Reduce" {
 				// handle func lit and functions
-				switch fn := callArgs[i][0].(type) {
+				fnId := 0
+				if ident.Name == "Reduce" {
+					fnId = 1
+				}
+				var funLit *ast.FuncLit
+				switch fn := callArgs[i][fnId].(type) {
 				case *ast.FuncLit:
 					funcType = fn.Type
 				case *ast.Ident:
-					if funcDecl, ok := fn.Obj.Decl.(*ast.FuncDecl); ok {
-						funcType = funcDecl.Type
-					} else {
+					funLit = wrapFuncToFuncLit(fn)
+					if funLit == nil {
 						fmt.Printf("Seq macro expected FuncDecl got func type %T\n", fn)
 						return false
-
 					}
+					funcType = funLit.Type
 				default:
 					fmt.Printf("Seq macro unhandled func type %T\n", fn)
 					return false
 				}
+
+				paramsNum := 0
+				// count
+				for _, field := range funcType.Params.List {
+					paramsNum += len(field.Names) // same type arg
+				}
+
+				if paramsNum == 1 || (paramsNum == 2 && ident.Name == "Reduce") {
+					funcType.Params.List = append(funcType.Params.List,
+						&ast.Field{
+							Names: []*ast.Ident{
+								{Name: "_"}, // ignored
+							},
+							Type: &ast.Ident{
+								Name: "int",
+							},
+						})
+					if funLit != nil {
+						// swap call argument if we wrapped func
+						callArgs[i][fnId] = funLit
+					}
+				}
+
+			}
+			// TODO refactor
+			if ident.Name != "Ret" && ident.Name != "Reduce" {
 				var resultTyp ast.Expr
 				if ident.Name == "Map" {
 					resultTyp = funcType.Results.List[0].Type
 				} else if ident.Name == "Filter" {
 					resultTyp = funcType.Params.List[0].Type
 				}
-				// reduce does not modify sequence
-				if ident.Name != "Reduce" {
-					arrType := &ast.ArrayType{
-						Elt: resultTyp,
-					}
-					lastNewSeqStmt, lastNewSeqSeq = newDeclStmt(
-						token.VAR, fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)),
-						arrType)
-					newSeqBlocks = append(newSeqBlocks, lastNewSeqStmt)
-
-					// assing unary op to output
-					callArgs[i] = append(callArgs[i], &ast.UnaryExpr{
-						Op: token.AND,
-						X: &ast.Ident{
-							Name: fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)-1),
-							Obj:  lastNewSeqSeq.Obj,
-						},
-					})
+				arrType := &ast.ArrayType{
+					Elt: resultTyp,
 				}
+				lastNewSeqStmt, lastNewSeqSeq = newDeclStmt(
+					token.VAR, fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)),
+					arrType)
+				newSeqBlocks = append(newSeqBlocks, lastNewSeqStmt)
+
+				// assing unary op to output
+				callArgs[i] = append(callArgs[i], &ast.UnaryExpr{
+					Op: token.AND,
+					X: &ast.Ident{
+						Name: fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)-1),
+						Obj:  lastNewSeqSeq.Obj,
+					},
+				})
 			}
 		}
 		body := copyBodyStmt(len(callArgs[i]),
@@ -225,3 +249,122 @@ func MacroNewSeq(
 
 	return true
 }
+
+// copies params
+// TODO results should be copied with changed
+func wrapFuncToFuncLit(fn *ast.Ident) *ast.FuncLit {
+	var decl *ast.FuncDecl
+	var ok bool
+	if fn.Obj == nil || fn.Obj.Decl == nil {
+		return nil
+	}
+	if decl, ok = fn.Obj.Decl.(*ast.FuncDecl); !ok {
+		return nil
+	}
+	fnLit := &ast.FuncLit{}
+	fnLit.Type = &ast.FuncType{
+		Results: decl.Type.Results,
+	}
+	var args []ast.Expr
+	paramsList := make([]*ast.Field, len(decl.Type.Params.List))
+	for i, param := range decl.Type.Params.List {
+		paramsList[i] = param
+		for i := range param.Names {
+			args = append(args, param.Names[i])
+		}
+	}
+	fnLit.Type.Params = &ast.FieldList{
+		List: paramsList,
+	}
+
+	callFn := createCallExpr(fn, args)
+	body := &ast.BlockStmt{
+		List: []ast.Stmt{
+			&ast.ReturnStmt{
+				Results: []ast.Expr{callFn},
+			},
+		},
+	}
+	fnLit.Body = body
+	return fnLit
+}
+
+/*
+&ast.FuncLit{
+    Type: &ast.FuncType{
+        Func:   3361937,
+        Params: &ast.FieldList{
+            Opening: 3361941,
+            List:    {
+                &ast.Field{
+                    Doc:   (*ast.CommentGroup)(nil),
+                    Names: {
+                        &ast.Ident{
+                            NamePos: 3361942,
+                            Name:    "v",
+                            Obj:     &ast.Object{
+                                Kind: 4,
+                                Name: "v",
+                                Decl: &ast.Field{(CYCLIC REFERENCE)},
+                                Data: nil,
+                                Type: nil,
+                            },
+                        },
+                    },
+                    Type: &ast.Ident{
+                        NamePos: 3361944,
+                        Name:    "int",
+                        Obj:     (*ast.Object)(nil),
+                    },
+                    Tag:     (*ast.BasicLit)(nil),
+                    Comment: (*ast.CommentGroup)(nil),
+                },
+            },
+            Closing: 3361947,
+        },
+        Results: &ast.FieldList{
+            Opening: 0,
+            List:    {
+                &ast.Field{
+                    Doc:   (*ast.CommentGroup)(nil),
+                    Names: nil,
+                    Type:  &ast.Ident{
+                        NamePos: 3361949,
+                        Name:    "bool",
+                        Obj:     (*ast.Object)(nil),
+                    },
+                    Tag:     (*ast.BasicLit)(nil),
+                    Comment: (*ast.CommentGroup)(nil),
+                },
+            },
+            Closing: 0,
+        },
+    },
+    Body: &ast.BlockStmt{
+        Lbrace: 3361954,
+        List:   {
+            &ast.ReturnStmt{
+                Return:  3361956,
+                Results: {
+                    &ast.BinaryExpr{
+                        X:  &ast.BinaryExpr{
+                            X:  &ast.Ident{
+                                NamePos: 3361963,
+                                Name:    "v",
+                                Obj:     &ast.Object{(CYCLIC REFERENCE)},
+                            },
+                            OpPos: 3361964,
+                            Op:    16,
+                            Y:     &ast.BasicLit{ValuePos:3361965, Kind:5, Value:"2"},
+                        },
+                        OpPos: 3361967,
+                        Op:    39,
+                        Y:     &ast.BasicLit{ValuePos:3361970, Kind:5, Value:"0"},
+                    },
+                },
+            },
+        },
+        Rbrace: 3361972,
+    },
+}
+*/

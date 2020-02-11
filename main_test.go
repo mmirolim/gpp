@@ -44,7 +44,7 @@ func TestMacro(t *testing.T) {
 			desc:    "Test NewSeq M/F/R fluent api",
 			testDir: filepath.Join(testDir, "newseq"),
 			output: `
-NewSeq Map/Filter [{strLen:3} {strLen:3}]
+NewSeq Map/Filter [{strLen:3} {strLen:4}]
 NewSeq res [2] sum even 12 mult even 48
 `,
 			err: nil,
