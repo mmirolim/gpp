@@ -64,6 +64,8 @@ func main() {
 	}
 	// go build
 	cmd = exec.Command("go", "build")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	err = cmd.Run()
 	if err != nil {
 		log.Fatalf("go build error %+v", err)
