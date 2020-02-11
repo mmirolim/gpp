@@ -12,6 +12,7 @@ import (
 func Log_μ(args ...interface{}) {
 }
 
+// TODO add fmt package if missing
 func MacroLogExpand(
 	cur *astutil.Cursor,
 	parentStmt ast.Stmt,

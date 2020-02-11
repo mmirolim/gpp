@@ -40,7 +40,7 @@ func MacroTryExpand(
 	// check all errors
 	var bodyList []ast.Stmt
 	// create new err variable
-	errDecl, errIdent := newDeclStmt(token.VAR, "err", &ast.Ident{Name: "error"})
+	errDecl, errIdent := createDeclStmt(token.VAR, "err", &ast.Ident{Name: "error"})
 	bodyList = append(bodyList, errDecl)
 	for _, stmt := range funcLit.Body.List {
 		bodyList = append(bodyList, stmt)

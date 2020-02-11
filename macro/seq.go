@@ -134,7 +134,7 @@ func MacroNewSeq(
 				Obj:  prevObj,
 			})
 			var funcType *ast.FuncType
-			if ident.Name != "Ret" { //}&& ident.Name != "Reduce" {
+			if ident.Name != "Ret" {
 				// handle func lit and functions
 				fnId := 0
 				if ident.Name == "Reduce" {
@@ -179,7 +179,6 @@ func MacroNewSeq(
 				}
 
 			}
-			// TODO refactor
 			if ident.Name != "Ret" && ident.Name != "Reduce" {
 				var resultTyp ast.Expr
 				if ident.Name == "Map" {
@@ -190,7 +189,7 @@ func MacroNewSeq(
 				arrType := &ast.ArrayType{
 					Elt: resultTyp,
 				}
-				lastNewSeqStmt, lastNewSeqSeq = newDeclStmt(
+				lastNewSeqStmt, lastNewSeqSeq = createDeclStmt(
 					token.VAR, fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)),
 					arrType)
 				newSeqBlocks = append(newSeqBlocks, lastNewSeqStmt)
@@ -288,83 +287,3 @@ func wrapFuncToFuncLit(fn *ast.Ident) *ast.FuncLit {
 	fnLit.Body = body
 	return fnLit
 }
-
-/*
-&ast.FuncLit{
-    Type: &ast.FuncType{
-        Func:   3361937,
-        Params: &ast.FieldList{
-            Opening: 3361941,
-            List:    {
-                &ast.Field{
-                    Doc:   (*ast.CommentGroup)(nil),
-                    Names: {
-                        &ast.Ident{
-                            NamePos: 3361942,
-                            Name:    "v",
-                            Obj:     &ast.Object{
-                                Kind: 4,
-                                Name: "v",
-                                Decl: &ast.Field{(CYCLIC REFERENCE)},
-                                Data: nil,
-                                Type: nil,
-                            },
-                        },
-                    },
-                    Type: &ast.Ident{
-                        NamePos: 3361944,
-                        Name:    "int",
-                        Obj:     (*ast.Object)(nil),
-                    },
-                    Tag:     (*ast.BasicLit)(nil),
-                    Comment: (*ast.CommentGroup)(nil),
-                },
-            },
-            Closing: 3361947,
-        },
-        Results: &ast.FieldList{
-            Opening: 0,
-            List:    {
-                &ast.Field{
-                    Doc:   (*ast.CommentGroup)(nil),
-                    Names: nil,
-                    Type:  &ast.Ident{
-                        NamePos: 3361949,
-                        Name:    "bool",
-                        Obj:     (*ast.Object)(nil),
-                    },
-                    Tag:     (*ast.BasicLit)(nil),
-                    Comment: (*ast.CommentGroup)(nil),
-                },
-            },
-            Closing: 0,
-        },
-    },
-    Body: &ast.BlockStmt{
-        Lbrace: 3361954,
-        List:   {
-            &ast.ReturnStmt{
-                Return:  3361956,
-                Results: {
-                    &ast.BinaryExpr{
-                        X:  &ast.BinaryExpr{
-                            X:  &ast.Ident{
-                                NamePos: 3361963,
-                                Name:    "v",
-                                Obj:     &ast.Object{(CYCLIC REFERENCE)},
-                            },
-                            OpPos: 3361964,
-                            Op:    16,
-                            Y:     &ast.BasicLit{ValuePos:3361965, Kind:5, Value:"2"},
-                        },
-                        OpPos: 3361967,
-                        Op:    39,
-                        Y:     &ast.BasicLit{ValuePos:3361970, Kind:5, Value:"0"},
-                    },
-                },
-            },
-        },
-        Rbrace: 3361972,
-    },
-}
-*/

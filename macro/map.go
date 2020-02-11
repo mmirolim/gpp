@@ -36,7 +36,7 @@ func PrintMapf_μ(f string, m interface{}) {
 	arg1 := f
 	arg2 := map[_T]_G{}
 	for k, v := range arg2 {
-		fmt.Printf(arg1, k, v) // output for debug
+		fmt.Printf(arg1, k, v)
 	}
 }
 
@@ -44,6 +44,6 @@ func PrintMapKeys_μ(keys, m interface{}) {
 	arg1 := []_T{}
 	arg2 := map[_T]_G{}
 	for i := range arg1 {
-		fmt.Printf("%v : %v\n", arg1[i], arg2[arg1[i]]) // output for debug
+		fmt.Printf("%v : %v\n", arg1[i], arg2[arg1[i]])
 	}
 }

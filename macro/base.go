@@ -53,43 +53,8 @@ type MacroExpander func(cur *astutil.Cursor,
 func PrintSlice_μ(sl interface{}) {
 	arg1 := []_T{}
 	for i := range arg1 {
-		fmt.Printf("%v\n", arg1[i]) // output for debug
+		fmt.Printf("%v\n", arg1[i])
 	}
-}
-
-// TODO should resolve across packages
-func AllMacroMethods(f *ast.File) map[string]*ast.FuncDecl {
-	methods := make(map[string]*ast.FuncDecl)
-	for _, decl := range f.Decls {
-		fnDecl, ok := decl.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-		if fnDecl.Recv == nil {
-			continue
-		}
-		typeName := ""
-		// method
-		switch v := fnDecl.Recv.List[0].Type.(type) {
-		case *ast.Ident:
-			typeName = v.Name
-		case *ast.StarExpr:
-			ident, ok := v.X.(*ast.Ident)
-			if ok {
-				typeName = ident.Name
-			} else {
-				log.Fatalf("unexpected ast type %T", v.X)
-			}
-
-		default:
-			log.Fatalf("[WARN] unhandled method reciver case %T\n", v)
-
-		}
-		if strings.HasSuffix(typeName, MacroSymbol) {
-			methods[fmt.Sprintf("%s.%s", typeName, fnDecl.Name.Name)] = fnDecl
-		}
-	}
-	return methods
 }
 
 func AllMacroDecl(f *ast.File, allMacroDecl map[string]*ast.FuncDecl) {
@@ -244,7 +209,7 @@ func copyBodyStmt(argNum int, body *ast.BlockStmt, noreturns bool) *ast.BlockStm
 
 // creates var {name} {typ};
 // returns identifier created
-func newDeclStmt(decTyp token.Token, name string, typ ast.Expr) (*ast.DeclStmt, *ast.Ident) {
+func createDeclStmt(decTyp token.Token, name string, typ ast.Expr) (*ast.DeclStmt, *ast.Ident) {
 	stmt := new(ast.DeclStmt)
 	genDecl := new(ast.GenDecl)
 	genDecl.Tok = decTyp
