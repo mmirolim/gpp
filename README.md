@@ -91,7 +91,7 @@ Until everyone waits for Go 2.0 and Generics letâ€™s sprinkle some sugar with â€
 
 ## Benchmarks
 
-	```go
+  ```go
 	func BenchmarkNewSeqMacro(b *testing.B) {
 	fseq := []float64{100, 200, 300, 400, 500, 600}
 	type styp struct{ strLen int }
@@ -105,14 +105,14 @@ Until everyone waits for Go 2.0 and Generics letâ€™s sprinkle some sugar with â€
 			Ret(&out)
 		}
 	}
-	```
+  ```
 
 	goos: linux
 	goarch: amd64
 	BenchmarkNewSeqMacro-8             	 2528289	       463 ns/op
 	BenchmarkNewSeqOpsHandWritten-8    	 3042022	       395 ns/op
 	BenchmarkNewSeqOpsByReflection-8   	  125785	      9479 ns/op
-
+ 
 ## Installation
 	
  gpp requires to go command to be available
