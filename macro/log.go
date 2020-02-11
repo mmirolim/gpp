@@ -12,7 +12,6 @@ import (
 func Log_μ(args ...interface{}) {
 }
 
-// TODO add fmt package if missing
 func MacroLogExpand(
 	cur *astutil.Cursor,
 	parentStmt ast.Stmt,
@@ -25,7 +24,6 @@ func MacroLogExpand(
 	if len(callArgs[0]) == 0 {
 		return false
 	}
-	// TODO expected that it important
 	// construct fmt.Printf()
 	fmtExpr := &ast.SelectorExpr{
 		X:   &ast.Ident{Name: "fmt"},
@@ -67,6 +65,7 @@ func MacroLogExpand(
 	fmtCfg.Value = fmt.Sprintf("\"%s\\n\"", fmtCfg.Value)
 	callExpr := createCallExpr(fmtExpr, args)
 	cur.InsertAfter(&ast.ExprStmt{X: callExpr})
+	astutil.AddImport(ApplyState.Fset, ApplyState.File, "fmt")
 	// expand body macros
 	astutil.Apply(callExpr, pre, post)
 	cur.Delete()
