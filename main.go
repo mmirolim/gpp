@@ -151,12 +151,14 @@ func parseDir(dir string) error {
 			} else {
 				return true // no macro in package
 			}
+
 			removeMacroLibImport(file)
 			// remove comments
 			file.Comments = nil
 			macro.ApplyState.IsOuterMacro = false
 			macro.ApplyState.File = file
 			macro.ApplyState.Fset = pkg.Fset
+			macro.ApplyState.Pkg = pkg
 			macro.ApplyState.SrcDir = src
 			modifiedAST := astutil.Apply(file, pre, post)
 			updatedFile := modifiedAST.(*ast.File)

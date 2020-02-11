@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/kr/pretty"
 	"golang.org/x/tools/go/ast/astutil"
 )
 
@@ -145,14 +146,19 @@ func MacroNewSeq(
 				case *ast.FuncLit:
 					funcType = fn.Type
 				case *ast.Ident:
-					funLit = wrapFuncToFuncLit(fn)
-					if funLit == nil {
-						fmt.Printf("Seq macro expected FuncDecl got func type %T\n", fn)
-						return false
+					if fn.Obj == nil {
+						fn.Obj = resolveExpr(fn, ApplyState.Pkg)
 					}
+					funLit = wrapFuncToFuncLit(fn)
+					funcType = funLit.Type
+				case *ast.SelectorExpr:
+					if fn.Sel.Obj == nil {
+						fn.Sel.Obj = resolveExpr(fn, ApplyState.Pkg)
+					}
+					funLit = wrapFuncToFuncLit(fn)
 					funcType = funLit.Type
 				default:
-					fmt.Printf("Seq macro unhandled func type %T\n", fn)
+					fmt.Printf("Currently unsupported Expr for MFR %# v\n", pretty.Formatter(fn))
 					return false
 				}
 
@@ -251,13 +257,16 @@ func MacroNewSeq(
 
 // copies params
 // TODO results should be copied with changed
-func wrapFuncToFuncLit(fn *ast.Ident) *ast.FuncLit {
+func wrapFuncToFuncLit(fnExpr ast.Expr) *ast.FuncLit {
+	var objDecl interface{}
+	if ident, ok := fnExpr.(*ast.Ident); ok {
+		objDecl = ident.Obj.Decl
+	} else if sexpr, ok := fnExpr.(*ast.SelectorExpr); ok {
+		objDecl = sexpr.Sel.Obj.Decl
+	}
 	var decl *ast.FuncDecl
 	var ok bool
-	if fn.Obj == nil || fn.Obj.Decl == nil {
-		return nil
-	}
-	if decl, ok = fn.Obj.Decl.(*ast.FuncDecl); !ok {
+	if decl, ok = objDecl.(*ast.FuncDecl); !ok {
 		return nil
 	}
 	fnLit := &ast.FuncLit{}
@@ -276,7 +285,7 @@ func wrapFuncToFuncLit(fn *ast.Ident) *ast.FuncLit {
 		List: paramsList,
 	}
 
-	callFn := createCallExpr(fn, args)
+	callFn := createCallExpr(fnExpr, args)
 	body := &ast.BlockStmt{
 		List: []ast.Stmt{
 			&ast.ReturnStmt{

@@ -11,6 +11,7 @@ import (
 
 	"github.com/kr/pretty"
 	"golang.org/x/tools/go/ast/astutil"
+	"golang.org/x/tools/go/packages"
 )
 
 const (
@@ -26,6 +27,7 @@ var ApplyState = struct {
 	IsOuterMacro bool
 	File         *ast.File
 	Fset         *token.FileSet
+	Pkg          *packages.Package
 	SrcDir       string
 }{}
 
@@ -331,6 +333,46 @@ func FormatNode(node ast.Node) (string, error) {
 		fmt.Printf("AST on error %+v\n", pretty.Formatter(node)) // output for debug
 	}
 	return buf.String(), err
+}
+
+// TODO build prog to able to resolve
+// TODO cache resolved elements
+func resolveExpr(expr ast.Expr, curPkg *packages.Package) *ast.Object {
+	// support local ident resolution
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return resolveIdentInPkg(e, curPkg)
+	case *ast.SelectorExpr:
+		// only one lvl selection supported
+		// check current package scope
+		// expect lib name
+		pkgName, ok := e.X.(*ast.Ident)
+		if !ok {
+			break
+		}
+		for _, pkg := range curPkg.Imports {
+			if pkgName.Name == pkg.Name {
+				return resolveIdentInPkg(e.Sel, pkg)
+			}
+		}
+	}
+	fmt.Printf("WARN Currently unhandled expr to resolve %# v\n", pretty.Formatter(expr))
+	return nil
+}
+
+func resolveIdentInPkg(ident *ast.Ident, pkg *packages.Package) *ast.Object {
+	for _, file := range pkg.Syntax {
+		for _, decl := range file.Decls {
+			funDecl, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if funDecl.Name.Name == ident.Name {
+				return funDecl.Name.Obj
+			}
+		}
+	}
+	return nil
 }
 
 // general rules
