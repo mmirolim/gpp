@@ -12,7 +12,7 @@ Until everyone waits for Go 2.0 and Generics let’s sprinkle some sugar with �
  More examples in the testdata directory
  
  Try_μ let's to omit manual and tedious error checking (if err return err)
- 
+ ```go
 	// failed on fPtrIntError
 	err := macro.Try_μ(func() error {
 		fname, _ := fStrError(false)
@@ -23,9 +23,10 @@ Until everyone waits for Go 2.0 and Generics let’s sprinkle some sugar with �
 		fmt.Printf("fname %+v\n", fname) // output for debug
 		return nil
 	})
-	
+  ```	
   Expands to 
   
+  ```go
 	err := func() error {
 		var err error
 		fname, err := fStrError(false)
@@ -40,23 +41,27 @@ Until everyone waits for Go 2.0 and Generics let’s sprinkle some sugar with �
 		fmt.Printf("fname %+v\n", fname)
 		return err
 	}()
-
+  ```
 	
   Log_μ to log without paying the cost of runtime calls and indirections (will be possible to selectively enable/disable logging per file on preprocessing stage no need to manually guard logs call/remove them)
   
+  ```go
 	v1, v2  := 10, 20
 	macro.Log_μ("some context", v1)
 	macro.Log_μ(v1, v2)
-	
+  ```
+  
   Expands
-
+  
+  ```go
 	v1, v2 := 10, 20
 	fmt.Printf("/log/main.go:14 %v v1=%#v\n", "some context", v1)
 	fmt.Printf("/log/main.go:15 v1=%#v v2=%#v\n", v1, v2)
-	
+  ```
 
   Map/Filter/Reduce operations on any slice type, they expand to loops and block statement on call site
   
+  ```go
 	fseq := []float64{100, 200, 300, 400, 500, 600}
 	type styp struct{ strLen int }
 	var out []styp
@@ -72,7 +77,7 @@ Until everyone waits for Go 2.0 and Generics let’s sprinkle some sugar with �
 	macro.NewSeq_μ(seq).
 		Filter(func(v int) bool { return v%2 == 0 }).
 		Reduce(&sumOfEvens, func(acc, v, i int) int { return acc + v }).
-
+  ```
 
 ## Edge cases
 
@@ -85,7 +90,7 @@ Until everyone waits for Go 2.0 and Generics let’s sprinkle some sugar with �
 
 # Installation
 	
- gpp equires to go command to be available
+ gpp requires to go command to be available
 	
 	go get -u github.com/mmirolim/gtp
 
