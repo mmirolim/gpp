@@ -1,0 +1,14 @@
+language: go
+
+go:
+  - 1.13
+
+before_install:
+  - go mod download
+
+script:
+  # run tests on a standard platform
+  - go test -v -coverprofile=coverage.txt -covermode=atomic
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash)
