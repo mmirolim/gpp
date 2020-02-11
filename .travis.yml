@@ -4,7 +4,6 @@ go:
   - 1.13
 
 before_install:
-  - go mod download
   - go get -u github.com/kr/pretty
   - go get -u github.com/BurntSushi/ty
   - go get -u github.com/BurntSushi/ty/fun
