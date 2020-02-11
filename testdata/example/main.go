@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -45,6 +46,7 @@ func main() {
 			return acc + int(r.Dates[len(r.Dates)-1].Number)
 		})
 
+	macro.Log_μ(">> Total Number of Cases", totalCases)
 	type casesByDate struct {
 		date  time.Time
 		cases int
@@ -60,13 +62,18 @@ func main() {
 	})
 	var cbd []string
 	macro.NewSeq_μ(casesByDates).Map(func(v casesByDate, i int) string {
-		return fmt.Sprintf("%s %d",
+		bar := make([]byte, int(math.Log2(float64(casesByDates[i].cases))))
+		macro.NewSeq_μ(bar).Map(func(ch byte, i int) byte {
+			bar[i] = '*'
+			return bar[i]
+		})
+		return fmt.Sprintf("%s %s %d",
 			casesByDates[i].date.Format("01/02/06"),
-			casesByDates[i].cases)
+			string(bar), casesByDates[i].cases)
 	}).Ret(&cbd)
+	macro.Log_μ(">> Log Scale")
 	macro.PrintSlice_μ(cbd)
 
-	macro.Log_μ(">> Total Number of Cases", totalCases)
 	var countries []string
 	macro.MapKeys_μ(&countries, totalByCountry)
 	sort.Strings(countries)
