@@ -92,7 +92,7 @@ Until everyone waits for Go 2.0 and Generics letâ€™s sprinkle some sugar with â€
 	
  gpp requires to go command to be available
 	
-	go get -u github.com/mmirolim/gtp
+	go get -u github.com/mmirolim/gpp
 
 	
 # Usage
