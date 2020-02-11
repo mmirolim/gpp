@@ -32,7 +32,6 @@ func main() {
 		Ret(&res)
 
 	fmt.Printf("NewSeq res %d sum even %+v mult even %d\n", res, totalEvens, totalProduct)
-
 }
 
 func ftoa(v float64) string {

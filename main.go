@@ -20,9 +20,11 @@ import (
 )
 
 var (
-	dst     = flag.String("C", ".", "working directory")
-	src     = filepath.Join(os.TempDir(), "gpp_temp_build_dir")
-	runFlag = flag.Bool("run", false, "build run binary")
+	dst      = flag.String("C", ".", "working directory")
+	src      = filepath.Join(os.TempDir(), "gpp_temp_build_dir")
+	runFlag  = flag.Bool("run", false, "run run binary")
+	testFlag = flag.Bool("test", false, "test binary")
+	goArgs   = flag.String("args", "", "args to go")
 )
 
 // Test macros as library
@@ -63,15 +65,29 @@ func main() {
 	if err != nil {
 		log.Fatalf("parse dir error %+v", err)
 	}
-	// go build
-	cmd = exec.Command("go", "build")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		log.Fatalf("go build error %+v", err)
+	args := strings.Split(*goArgs, " ")
+	if *testFlag {
+		cmd = exec.Command("go", "test", "-v", "./...")
+		cmd.Args = append(cmd.Args, args...)
+		fmt.Printf("%+v\n", cmd.Args) // output for debug
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err = cmd.Run()
+		if err != nil {
+			log.Fatalf("binary exec error %+v", err)
+		}
+	} else {
+		// go build
+		cmd = exec.Command("go", "build")
+		cmd.Args = append(cmd.Args, args...)
+		fmt.Printf("%+v\n", cmd.Args) // output for debug
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err = cmd.Run()
+		if err != nil {
+			log.Fatalf("go build error %+v", err)
+		}
 	}
-
 	err = os.Chdir(curDir)
 	if err != nil {
 		log.Fatalf("chdir %+v", err)
@@ -85,6 +101,8 @@ func main() {
 	if *runFlag {
 		// TODO pass flags
 		cmd = exec.Command("./" + base)
+		cmd.Args = append(cmd.Args, args...)
+		fmt.Printf("%+v\n", cmd.Args) // output for debug
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = cmd.Run()
