@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/mmirolim/gpp/macro"
 	"golang.org/x/tools/go/ast/astutil"
@@ -47,7 +48,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("mkdir all error %+v", err)
 	}
-	// copy whole directory to /dev/shm
+	// copy whole directory to tmp dir
 	cmd := exec.Command("cp", "-r", *dst, src)
 	err = cmd.Run()
 	if err != nil {
@@ -93,6 +94,8 @@ func main() {
 	}
 }
 
+// packages should be vendored otherwise original lib/deps files will be
+// overwritten
 func parseDir(dir string) error {
 	ctx := context.Background()
 	cfg := &packages.Config{
@@ -131,19 +134,23 @@ func parseDir(dir string) error {
 		}
 	}
 
-	macroPkg, ok := pkgs[0].Imports[macro.MacroPkgPath]
-	if !ok {
-		fmt.Println("no macro found")
-		// return nothing to do
-		return nil
-	}
-	for _, file := range macroPkg.Syntax {
-		macro.AllMacroDecl(file, macro.MacroDecl)
-	}
-
-	for _, pkg := range pkgs {
+	var visitFailed bool
+	var loadMacroLibOnce sync.Once
+	packages.Visit(pkgs, func(pkg *packages.Package) bool {
+		if visitFailed {
+			// skip imported packages on pkg fail
+			return true
+		}
 		for i, file := range pkg.Syntax {
-			// remove macro import
+			if macroPkg, ok := pkg.Imports[macro.MacroPkgPath]; ok {
+				loadMacroLibOnce.Do(func() {
+					for _, file := range macroPkg.Syntax {
+						macro.AllMacroDecl(file, macro.MacroDecl)
+					}
+				})
+			} else {
+				return true // no macro in package
+			}
 			removeMacroLibImport(file)
 			// remove comments
 			file.Comments = nil
@@ -155,31 +162,46 @@ func parseDir(dir string) error {
 			updatedFile := modifiedAST.(*ast.File)
 			astStr, err := macro.FormatNode(updatedFile)
 			if err != nil {
-				fmt.Printf("%+v\n", "format err") // output for debug
-				return err
+				fmt.Printf("format node err %+v\n", err) // output for debug
+				visitFailed = true
+				break
 			}
+			// packages should be vendored otherwise original lib/deps files will be
+			// overwritten
 			err = ioutil.WriteFile(pkg.GoFiles[i], []byte(astStr), 0700)
 			if err != nil {
-				fmt.Printf("%+v\n", "write error") // output for debug
-				return err
+				fmt.Printf("write error %+v\n", err) // output for debug
+				visitFailed = true
+				break
 			}
 		}
-	}
+		return true
+	}, nil)
+
 	return nil
 }
 
 func removeMacroLibImport(file *ast.File) {
-OUTER:
-	for _, decl := range file.Decls {
-		if genDecl, ok := decl.(*ast.GenDecl); ok {
-			for i := range genDecl.Specs {
-				if spec, ok := genDecl.Specs[i].(*ast.ImportSpec); ok {
-					if strings.Contains(spec.Path.Value, macro.MacroPkgPath) {
-						genDecl.Specs = append(genDecl.Specs[:i], genDecl.Specs[i+1:]...)
-						break OUTER
-					}
-				}
+	for di, decl := range file.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for i := range genDecl.Specs {
+			spec, ok := genDecl.Specs[i].(*ast.ImportSpec)
+			if !ok {
+				continue
 			}
+			if !strings.Contains(spec.Path.Value, macro.MacroPkgPath) {
+				continue
+			}
+			if len(genDecl.Specs) == 1 {
+				// remove import decl
+				file.Decls = append(file.Decls[:di], file.Decls[di+1:]...)
+			} else {
+				genDecl.Specs = append(genDecl.Specs[:i], genDecl.Specs[i+1:]...)
+			}
+			return
 		}
 	}
 }
