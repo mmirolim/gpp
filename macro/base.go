@@ -333,7 +333,7 @@ func FnNameFromCallExpr(fn *ast.CallExpr) (string, error) {
 	return fname, nil
 }
 
-// copyBOdyStmt only creates assignment statements
+// copyBodyStmt only creates assignment statements
 // shallow copy with new assignable statements
 func copyBodyStmt(argNum int, body *ast.BlockStmt, noreturns bool) *ast.BlockStmt {
 	block := new(ast.BlockStmt)

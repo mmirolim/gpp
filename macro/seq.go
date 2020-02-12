@@ -21,7 +21,8 @@ type _T interface{}
 type _G interface{}
 
 // NewSeq_μ constructs new sequence and scope
-// src must be slice and passed by value or pointer
+// src must be slice and passed by value
+// does not modify slice
 func NewSeq_μ(src interface{}) *seq_μ {
 	seq0 := []_T{}
 	return &seq_μ{seq0}
@@ -32,9 +33,7 @@ func NewSeq_μ(src interface{}) *seq_μ {
 func (seq *seq_μ) Ret(out interface{}) {
 	output := &[]_T{}
 	res := []_T{}
-	for i := range res {
-		*output = append(*output, res[i])
-	}
+	*output = res
 }
 
 // Filter values by fn predicate
@@ -115,8 +114,23 @@ func MacroNewSeq(
 	var lastNewSeqStmt ast.Stmt
 	var lastNewSeqSeq *ast.Ident
 	var blocks []ast.Stmt
-
+	// add new indirection to prev slice
+	lhs := []ast.Expr{&ast.Ident{
+		Name: "out", // out is output slice name in templates
+	}}
+	// assing unary op to output
+	rhs := []ast.Expr{
+		&ast.UnaryExpr{
+			Op: token.AND,
+			X: &ast.Ident{ // new indirection var name
+				Name: "prevSeq",
+			},
+		},
+	}
+	// reusable stmt
+	reuseSeqStmt := createAssignStmt(lhs, rhs, token.DEFINE)
 	for i := 0; i < len(idents); i++ {
+		reusePrevSeq := false
 		ident := idents[i]
 		// check if ident has return type
 		var funDecl *ast.FuncDecl
@@ -134,6 +148,7 @@ func MacroNewSeq(
 				log.Fatalf("funDecl expected but got %+v", ident.Obj.Decl)
 			}
 		}
+
 		if ident.Name != "NewSeq_μ" && newSeqBlocks != nil {
 			// add to new block
 			prevNewSeqBlock := newSeqBlocks[len(newSeqBlocks)-1]
@@ -209,19 +224,32 @@ func MacroNewSeq(
 				arrType := &ast.ArrayType{
 					Elt: resultTyp,
 				}
-				lastNewSeqStmt, lastNewSeqSeq = createDeclStmt(
-					token.VAR, fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)),
-					arrType)
-				newSeqBlocks = append(newSeqBlocks, lastNewSeqStmt)
+				// on filter use allocated slice from prev stage
+				if ident.Name == "Filter" && len(newSeqBlocks) > 1 {
+					// assign prevSeq := seqId[:0]
+					callArgs[i] = append(callArgs[i], &ast.SliceExpr{
+						X: &ast.Ident{
+							Name: fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)-1),
+							Obj:  lastNewSeqSeq.Obj,
+						},
+						High: &ast.BasicLit{Kind: token.INT, Value: "0"},
+					})
+					reusePrevSeq = true
+				} else {
+					lastNewSeqStmt, lastNewSeqSeq = createDeclStmt(
+						token.VAR, fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)),
+						arrType)
+					newSeqBlocks = append(newSeqBlocks, lastNewSeqStmt)
 
-				// assing unary op to output
-				callArgs[i] = append(callArgs[i], &ast.UnaryExpr{
-					Op: token.AND,
-					X: &ast.Ident{
-						Name: fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)-1),
-						Obj:  lastNewSeqSeq.Obj,
-					},
-				})
+					// out = &seqId, connects stage to pipeline
+					callArgs[i] = append(callArgs[i], &ast.UnaryExpr{
+						Op: token.AND,
+						X: &ast.Ident{
+							Name: fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)-1),
+							Obj:  lastNewSeqSeq.Obj,
+						},
+					})
+				}
 			}
 		}
 		body := copyBodyStmt(len(callArgs[i]),
@@ -233,12 +261,29 @@ func MacroNewSeq(
 				bodyArgs = append(bodyArgs, st)
 			}
 		}
-
 		// TODO check that number of args is correct
 		// switch Rhs with call args
 		// TODO support multiple declaration in one line
 		for i, carg := range callArgs[i] {
 			bodyArgs[i].Rhs = []ast.Expr{carg}
+		}
+		if reusePrevSeq {
+			// create extra assignment out = &prevSeq
+			// to connect "out" var to inner Filter
+			body.List[2] = createAssignStmt([]ast.Expr{&ast.Ident{Name: "prevSeq"}},
+				bodyArgs[2].Rhs, token.DEFINE)
+			// inject to body stmt list
+			body.List = append(body.List[:3],
+				append([]ast.Stmt{reuseSeqStmt}, body.List[3:]...)...)
+			// pass modified slice back, seqId = *out
+			stmt := createAssignStmt([]ast.Expr{&ast.Ident{
+				Name: fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)-1),
+			}}, []ast.Expr{
+				&ast.UnaryExpr{
+					Op: token.MUL, X: &ast.Ident{Name: "out"},
+				}}, token.ASSIGN)
+			// inject stmt after Filtering stage
+			body.List = append(body.List, stmt)
 		}
 		// expand body macros
 		astutil.Apply(body, pre, post)

@@ -124,9 +124,9 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 
 	goos: linux
 	goarch: amd64
-	BenchmarkNewSeqMacro-8             	 2528289	       463 ns/op
-	BenchmarkNewSeqOpsHandWritten-8    	 3042022	       395 ns/op
-	BenchmarkNewSeqOpsByReflection-8   	  125785	      9479 ns/op
+	BenchmarkNewSeqMacro-8             	 2759733	       432 ns/op
+	BenchmarkNewSeqOpsHandWritten-8    	 3033134	       399 ns/op
+	BenchmarkNewSeqOpsByReflection-8   	  118905	      9575 ns/op
  
 ## Installation
 	
