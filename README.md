@@ -14,7 +14,7 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
  
  Try_μ let's to omit manual and tedious error checking (if err return err), inner statements also checked
  ```go
-	// failed on fPtrIntError
+	// fails on fErr
 	err := macro.Try_μ(func() error {
 		fname, _ := fStrError(false)
 		_, result, _ = fPtrIntError(false)
@@ -22,7 +22,7 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 		NoErrReturn() // does not return err, no need to check
 		
 		if result == 1 {
-		    // should return here
+			// should return here
 			fErr(true) // returns err
 		}
 		// should not reach here
@@ -58,6 +58,7 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 	}()
   ```
 	
+	
   Log_μ to log without paying the cost of runtime calls and indirections (will be possible to selectively enable/disable logging per file on preprocessing stage no need to manually guard logs call/remove them)
   
   ```go
@@ -74,7 +75,8 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 	fmt.Printf("/log/main.go:15 v1=%#v v2=%#v\n", v1, v2)
   ```
 
-  Map/Filter/Reduce operations on any slice type, they expand to loops and block statement on-call site without using unsafe, interface{} or reflection so it is type safe and there is no significant performance loss
+
+ Map/Filter/Reduce operations on any slice type, they expand to loops and block statement on-call site without using unsafe, interface{} or reflection so it is type safe and there is no significant performance loss
   
   ```go
 	fseq := []float64{100, 200, 300, 400, 500, 600}
