@@ -339,29 +339,47 @@ func FormatNode(node ast.Node) (string, error) {
 func resolveExpr(expr ast.Expr, curPkg *packages.Package) *ast.Object {
 	if sig, ok := curPkg.TypesInfo.TypeOf(expr).(*types.Signature); ok {
 		return &ast.Object{
-			Name: "wrapFuncToFuncLit_func",
+			Name: "resolved_func_template",
 			Decl: &ast.FuncDecl{
-				Type: createFuncTypeFromSignature(sig),
+				Type: createFuncTypeFromSignature(sig, curPkg),
 			},
 		}
 	}
-
 	fmt.Printf("WARN resolveExpr unhandled expr to resolve %# v\n", pretty.Formatter(expr))
 	fmt.Printf("WARN TypeOf(expr) %#v\n", pretty.Formatter(curPkg.TypesInfo.TypeOf(expr)))
 	return nil
 }
 
-func createFuncTypeFromSignature(sig *types.Signature) *ast.FuncType {
+func createFuncTypeFromSignature(sig *types.Signature, curPkg *packages.Package) *ast.FuncType {
 	ft := &ast.FuncType{}
 	params := sig.Params()
 	paramList := make([]*ast.Field, 0, params.Len())
+	// TODO check is there other way around
+	getVarTyp := func(v *types.Var) string {
+		typ := v.Type().String()
+		idx := strings.LastIndexByte(typ, '/')
+		if idx > -1 {
+			ch := typ[0]
+			typ = typ[idx+1:]
+			if curPkg.Name == v.Pkg().Name() {
+				idx = strings.LastIndexByte(typ, '.')
+				if idx > -1 {
+					typ = typ[idx+1:]
+				}
+			}
+			if ch == '*' {
+				typ = "*" + typ
+			}
+		}
+		return typ
+	}
 	for i := 0; i < params.Len(); i++ {
 		paramList = append(paramList, &ast.Field{
 			Names: []*ast.Ident{
 				{Name: fmt.Sprintf("a%d", i)}, // ignored
 			},
 			Type: &ast.Ident{
-				Name: params.At(i).Type().String(),
+				Name: getVarTyp(params.At(i)),
 			},
 		})
 	}
@@ -373,7 +391,7 @@ func createFuncTypeFromSignature(sig *types.Signature) *ast.FuncType {
 				{Name: fmt.Sprintf("r%d", i)}, // ignored
 			},
 			Type: &ast.Ident{
-				Name: results.At(i).Type().String(),
+				Name: getVarTyp(results.At(i)),
 			},
 		})
 	}

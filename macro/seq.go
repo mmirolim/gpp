@@ -182,7 +182,6 @@ func MacroNewSeq(
 						callArgs[i][fnID] = funLit
 					}
 				}
-
 			}
 			if ident.Name != "Ret" && ident.Name != "Reduce" {
 				var resultTyp ast.Expr
