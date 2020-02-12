@@ -5,7 +5,8 @@
 
 # Gpp - go preprocessor (AST hacking experiment)
 
-Until everyone waits for Go 2.0 and Generics let’s sprinkle some sugar with “macros”. Gpp is macro preprocessor and library. Expansion of all identified macros is done before calling go build/run. Macros defined in macro library have a signature of regular functions and defined as AST mutation function in go code so there is no new syntax to learn. There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefits of AST macros are defining DSLs, simulate type parametric functions and extend the language without losing compile-time type safety, code bloat with code generation and without using slow/inconvenient reflection or unsafe packages.
+Until everyone waits for Go 2.0 and Generics let’s sprinkle some sugar with “macros”. Gpp is macro preprocessor and library. Expansion of all identified macros is done before calling go build/run. Macros defined in macro library have a signature of regular functions and defined as AST mutation function in go code so there is no new syntax to learn.
+There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefits of AST macros are defining DSLs, simulate type parametric functions and add sugar to the language without losing compile-time type safety, code bloat with code generation and without using slow/inconvenient reflection or unsafe packages.
 	
 ## Examples
 
