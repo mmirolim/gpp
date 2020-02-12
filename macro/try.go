@@ -38,103 +38,136 @@ func MacroTryExpand(
 	// expected assignstmt
 	pstmt := parentStmt.(*ast.AssignStmt)
 	// check all errors
-	var bodyList []ast.Stmt
+
 	// create new err variable
 	errDecl, errIdent := createDeclStmt(token.VAR, "err", &ast.Ident{Name: "error"})
-	bodyList = append(bodyList, errDecl)
-	var cexp *ast.CallExpr
-	var assignStmt *ast.AssignStmt
-OUTER:
-	for _, stmt := range funcLit.Body.List {
-		bodyList = append(bodyList, stmt)
-		switch rstmt := stmt.(type) {
-		case *ast.AssignStmt:
-			// error expected to be last ignored return value
-			lastVar := rstmt.Lhs[len(rstmt.Lhs)-1].(*ast.Ident)
-			if lastVar.Name != "_" {
-				continue OUTER
-			}
-			// check is callExpr
-			if cexp, ok = rstmt.Rhs[0].(*ast.CallExpr); !ok {
-				continue OUTER
-			}
-
-			obj := resolveExpr(cexp.Fun, ApplyState.Pkg)
-			funcDecl := obj.Decl.(*ast.FuncDecl)
-			// check if it is error
-			lastReturnType := funcDecl.Type.Results.
-				List[len(funcDecl.Type.Results.List)-1].Type
-			if typIdent, ok := lastReturnType.(*ast.Ident); ok {
-				if typIdent.Name != "error" {
+	var procRecur func([]ast.Stmt) []ast.Stmt
+	depth := 0
+	procRecur = func(stmts []ast.Stmt) []ast.Stmt {
+		depth++
+		var bodyList []ast.Stmt
+		var cexp *ast.CallExpr
+		var assignStmt *ast.AssignStmt
+	OUTER:
+		for _, stmt := range stmts {
+			bodyList = append(bodyList, stmt)
+			switch rstmt := stmt.(type) {
+			case *ast.AssignStmt:
+				// error expected to be last ignored return value
+				lastVar, ok := rstmt.Lhs[len(rstmt.Lhs)-1].(*ast.Ident)
+				if !ok {
 					continue OUTER
 				}
-			} else {
-				fmt.Printf("WARN Try macro unexpected type %T\n", lastReturnType)
-				continue OUTER
-
-			}
-			assignStmt = rstmt
-		case *ast.ExprStmt:
-			if cexp, ok = rstmt.X.(*ast.CallExpr); !ok {
-				continue OUTER
-			}
-			obj := resolveExpr(cexp.Fun, ApplyState.Pkg)
-			funcDecl := obj.Decl.(*ast.FuncDecl)
-			// check if it is error
-			if len(funcDecl.Type.Results.List) == 0 {
-				continue OUTER // does not return anything
-			}
-			lastReturnType := funcDecl.Type.Results.
-				List[len(funcDecl.Type.Results.List)-1].Type
-			if typIdent, ok := lastReturnType.(*ast.Ident); ok {
-				if typIdent.Name != "error" {
+				if lastVar.Name != "_" {
 					continue OUTER
 				}
-			} else {
-				fmt.Printf("WARN Try macro unexpected type %T\n", lastReturnType)
+				// check is callExpr
+				if cexp, ok = rstmt.Rhs[0].(*ast.CallExpr); !ok {
+					continue OUTER
+				}
+
+				obj := resolveExpr(cexp.Fun, ApplyState.Pkg)
+				funcDecl := obj.Decl.(*ast.FuncDecl)
+				// check if it is error
+				lastReturnType := funcDecl.Type.Results.
+					List[len(funcDecl.Type.Results.List)-1].Type
+				if typIdent, ok := lastReturnType.(*ast.Ident); ok {
+					if typIdent.Name != "error" {
+						continue OUTER
+					}
+				} else {
+					fmt.Printf("WARN Try macro unexpected type %T\n", lastReturnType)
+					continue OUTER
+
+				}
+				assignStmt = rstmt
+			case *ast.ExprStmt:
+				if cexp, ok = rstmt.X.(*ast.CallExpr); !ok {
+					continue OUTER
+				}
+				obj := resolveExpr(cexp.Fun, ApplyState.Pkg)
+				funcDecl := obj.Decl.(*ast.FuncDecl)
+				// check if it is error
+				if len(funcDecl.Type.Results.List) == 0 {
+					continue OUTER // does not return anything
+				}
+				lastReturnType := funcDecl.Type.Results.
+					List[len(funcDecl.Type.Results.List)-1].Type
+				if typIdent, ok := lastReturnType.(*ast.Ident); ok {
+					if typIdent.Name != "error" {
+						continue OUTER
+					}
+				} else {
+					fmt.Printf("WARN Try macro unexpected type %T\n", lastReturnType)
+					continue OUTER
+
+				}
+				// balance assignment
+				var lhs []ast.Expr
+				for i := 0; i < len(funcDecl.Type.Results.List); i++ {
+					lhs = append(lhs, &ast.Ident{Name: "_"})
+				}
+				rhs := []ast.Expr{cexp}
+				assignStmt = createAssignStmt(lhs, rhs, token.ASSIGN)
+				// replace current statement
+				bodyList[len(bodyList)-1] = assignStmt
+			default:
+				// TODO handle other block statements if/else/for etc
+				switch instmt := stmt.(type) {
+				case *ast.CaseClause:
+					instmt.Body = procRecur(instmt.Body)
+				case *ast.CommClause:
+					instmt.Body = procRecur(instmt.Body)
+				case *ast.ForStmt:
+					instmt.Body.List = procRecur(instmt.Body.List)
+				case *ast.IfStmt:
+					instmt.Body.List = procRecur(instmt.Body.List)
+				case *ast.RangeStmt:
+					instmt.Body.List = procRecur(instmt.Body.List)
+				case *ast.SelectStmt:
+					instmt.Body.List = procRecur(instmt.Body.List)
+				case *ast.SwitchStmt:
+					instmt.Body.List = procRecur(instmt.Body.List)
+				case *ast.TypeSwitchStmt:
+					instmt.Body.List = procRecur(instmt.Body.List)
+				default:
+					// skip
+				}
+				// unhandled statements
 				continue OUTER
 
 			}
-			// balance assignment
-			var lhs []ast.Expr
-			for i := 0; i < len(funcDecl.Type.Results.List); i++ {
-				lhs = append(lhs, &ast.Ident{Name: "_"})
+			// replace with err
+			if len(assignStmt.Lhs) > 0 {
+				assignStmt.Lhs[len(assignStmt.Lhs)-1] = errIdent
+			} else {
+				assignStmt.Lhs = []ast.Expr{errIdent}
 			}
-			rhs := []ast.Expr{cexp}
-			assignStmt = createAssignStmt(lhs, rhs, token.ASSIGN)
-			// replace current statement
-			bodyList[len(bodyList)-1] = assignStmt
-		default:
-			// TODO handle other block statements if/else/for etc
-			// unhandled statements
-			continue OUTER
 
+			callName, _ := FnNameFromCallExpr(cexp)
+			fmtCfg := &ast.BasicLit{
+				Kind:  token.STRING,
+				Value: fmt.Sprintf("\"%s: %%w\"", callName),
+			}
+			fmtExpr := &ast.SelectorExpr{
+				X:   &ast.Ident{Name: "fmt"},
+				Sel: &ast.Ident{Name: "Errorf"},
+			}
+			callExpr := createCallExpr(fmtExpr, []ast.Expr{fmtCfg, errIdent})
+			bodyList = append(bodyList, createIfErrRetStmt(errIdent, callExpr))
 		}
-		// replace with err
-		if len(assignStmt.Lhs) > 0 {
-			assignStmt.Lhs[len(assignStmt.Lhs)-1] = errIdent
-		} else {
-			assignStmt.Lhs = []ast.Expr{errIdent}
-		}
-
-		callName, _ := FnNameFromCallExpr(cexp)
-		fmtCfg := &ast.BasicLit{
-			Kind:  token.STRING,
-			Value: fmt.Sprintf("\"%s: %%w\"", callName),
-		}
-		fmtExpr := &ast.SelectorExpr{
-			X:   &ast.Ident{Name: "fmt"},
-			Sel: &ast.Ident{Name: "Errorf"},
-		}
-		callExpr := createCallExpr(fmtExpr, []ast.Expr{fmtCfg, errIdent})
-		bodyList = append(bodyList, createIfErrRetStmt(errIdent, callExpr))
+		return bodyList
 	}
-	funcLit.Body.List = bodyList
+	// add top level var err decl
+	stmts := []ast.Stmt{errDecl}
+	stmts = append(stmts, procRecur(funcLit.Body.List)...)
+
 	// last element should be return
-	ret, ok := bodyList[len(bodyList)-1].(*ast.ReturnStmt)
+	ret, ok := stmts[len(stmts)-1].(*ast.ReturnStmt)
 	if ok {
 		ret.Results[0] = errIdent
 	}
+	funcLit.Body.List = stmts
 	callExpr := createCallExpr(funcLit, nil)
 	pstmt.Rhs = []ast.Expr{callExpr}
 	// expand body macros

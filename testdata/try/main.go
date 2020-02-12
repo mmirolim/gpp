@@ -15,7 +15,9 @@ func main() {
 		// should return here
 		_, result, _ = fPtrIntError(false)
 		NoErrReturn()
-		fErr(true)
+		if result == 1 {
+			fErr(true)
+		}
 		// should not reach here
 		fmt.Printf("fname %+v\n", fname) // output for debug
 		return nil
