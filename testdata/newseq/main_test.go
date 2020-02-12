@@ -6,23 +6,36 @@ import (
 
 	"github.com/BurntSushi/ty/fun"
 	"github.com/mmirolim/gpp/macro"
+	"github.com/mmirolim/gpp/testdata/newseq/lib"
 )
 
 func TestNewSeqMacro(t *testing.T) {
 	fseq := []float64{100, 200, 300, 400, 500, 600}
 	type styp struct{ strLen int }
 	var out []styp
+	b := lib.B{}
+	ident := b.Ident
+	at := AT{}
 	macro.NewSeq_μ(fseq).Map(func(v float64) float64 { return v + 1 }).
 		Filter(func(v float64) bool { return v < 300 }).
+		Map(ident).
+		Map(at.Ident).
 		Map(ftoa).
 		Map(func(v string, i int) styp { return styp{len(v) + i} }).
 		Ret(&out)
-	fmt.Printf("%+v\n", out) // output for debug
+	fmt.Printf("%+v\n", out)
 
 	if len(out) != 2 {
 		t.Errorf("expected 3, got %d", len(out))
 	}
 }
+
+type AT struct{}
+
+func (a AT) Ident(v float64, i int) float64 {
+	return v
+}
+
 func TestNewSeqOpsHandWritten(t *testing.T) {
 	fseq := []float64{100, 200, 300, 400, 500, 600}
 	type styp struct{ strLen int }

@@ -86,7 +86,6 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 - Early prototype
 - Dependencies should be vendored, if not vendored may overwrite source code libraries 
   with expanded macroses
-- Does not fully resolve expressions in macros arguments, support only direct calls
 - Macro functions should be directly used without assignment or any indirection
 - Needs more extensive testing
 

@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/format"
 	"go/token"
+	"go/types"
 	"log"
 	"strings"
 
@@ -335,29 +336,50 @@ func FormatNode(node ast.Node) (string, error) {
 	return buf.String(), err
 }
 
-// TODO build prog to able to resolve
-// TODO cache resolved elements
 func resolveExpr(expr ast.Expr, curPkg *packages.Package) *ast.Object {
-	// support local ident resolution
-	switch e := expr.(type) {
-	case *ast.Ident:
-		return resolveIdentInPkg(e, curPkg)
-	case *ast.SelectorExpr:
-		// only one lvl selection supported
-		// check current package scope
-		// expect lib name
-		pkgName, ok := e.X.(*ast.Ident)
-		if !ok {
-			break
-		}
-		for _, pkg := range curPkg.Imports {
-			if pkgName.Name == pkg.Name {
-				return resolveIdentInPkg(e.Sel, pkg)
-			}
+	if sig, ok := curPkg.TypesInfo.TypeOf(expr).(*types.Signature); ok {
+		return &ast.Object{
+			Name: "wrapFuncToFuncLit_func",
+			Decl: &ast.FuncDecl{
+				Type: createFuncTypeFromSignature(sig),
+			},
 		}
 	}
-	fmt.Printf("WARN Currently unhandled expr to resolve %# v\n", pretty.Formatter(expr))
+
+	fmt.Printf("WARN resolveExpr unhandled expr to resolve %# v\n", pretty.Formatter(expr))
+	fmt.Printf("WARN TypeOf(expr) %#v\n", pretty.Formatter(curPkg.TypesInfo.TypeOf(expr)))
 	return nil
+}
+
+func createFuncTypeFromSignature(sig *types.Signature) *ast.FuncType {
+	ft := &ast.FuncType{}
+	params := sig.Params()
+	paramList := make([]*ast.Field, 0, params.Len())
+	for i := 0; i < params.Len(); i++ {
+		paramList = append(paramList, &ast.Field{
+			Names: []*ast.Ident{
+				{Name: fmt.Sprintf("a%d", i)}, // ignored
+			},
+			Type: &ast.Ident{
+				Name: params.At(i).Type().String(),
+			},
+		})
+	}
+	results := sig.Results()
+	resultList := make([]*ast.Field, 0, results.Len())
+	for i := 0; i < results.Len(); i++ {
+		resultList = append(resultList, &ast.Field{
+			Names: []*ast.Ident{
+				{Name: fmt.Sprintf("r%d", i)}, // ignored
+			},
+			Type: &ast.Ident{
+				Name: results.At(i).Type().String(),
+			},
+		})
+	}
+	ft.Params = &ast.FieldList{List: paramList}
+	ft.Results = &ast.FieldList{List: resultList}
+	return ft
 }
 
 func resolveIdentInPkg(ident *ast.Ident, pkg *packages.Package) *ast.Object {

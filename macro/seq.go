@@ -145,21 +145,15 @@ func MacroNewSeq(
 				switch fn := callArgs[i][fnID].(type) {
 				case *ast.FuncLit:
 					funcType = fn.Type
-				case *ast.Ident:
-					if fn.Obj == nil {
-						fn.Obj = resolveExpr(fn, ApplyState.Pkg)
-					}
-					funLit = wrapFuncToFuncLit(fn)
-					funcType = funLit.Type
-				case *ast.SelectorExpr:
-					if fn.Sel.Obj == nil {
-						fn.Sel.Obj = resolveExpr(fn, ApplyState.Pkg)
-					}
-					funLit = wrapFuncToFuncLit(fn)
-					funcType = funLit.Type
 				default:
-					fmt.Printf("Currently unsupported Expr for MFR %# v\n", pretty.Formatter(fn))
-					return false
+					obj := resolveExpr(fn, ApplyState.Pkg)
+					if obj != nil && obj.Decl != nil {
+						decl := obj.Decl.(*ast.FuncDecl)
+						funcType = decl.Type
+					} else {
+						fmt.Printf("Currently unsupported Expr for MFR %# v\n", pretty.Formatter(fn))
+						return false
+					}
 				}
 
 				paramsNum := 0
@@ -169,6 +163,11 @@ func MacroNewSeq(
 				}
 
 				if paramsNum == 1 || (paramsNum == 2 && ident.Name == "Reduce") {
+					if _, ok := callArgs[i][fnID].(*ast.FuncLit); !ok {
+						// need to wrap ident into wrapper with correct args
+						funLit = wrapExprToFuncLit(callArgs[i][fnID], funcType)
+						funcType = funLit.Type
+					}
 					funcType.Params.List = append(funcType.Params.List,
 						&ast.Field{
 							Names: []*ast.Ident{
@@ -257,25 +256,14 @@ func MacroNewSeq(
 
 // copies params
 // TODO results should be copied with changed
-func wrapFuncToFuncLit(fnExpr ast.Expr) *ast.FuncLit {
-	var objDecl interface{}
-	if ident, ok := fnExpr.(*ast.Ident); ok {
-		objDecl = ident.Obj.Decl
-	} else if sexpr, ok := fnExpr.(*ast.SelectorExpr); ok {
-		objDecl = sexpr.Sel.Obj.Decl
-	}
-	var decl *ast.FuncDecl
-	var ok bool
-	if decl, ok = objDecl.(*ast.FuncDecl); !ok {
-		return nil
-	}
+func wrapExprToFuncLit(fnExpr ast.Expr, fnType *ast.FuncType) *ast.FuncLit {
 	fnLit := &ast.FuncLit{}
 	fnLit.Type = &ast.FuncType{
-		Results: decl.Type.Results,
+		Results: fnType.Results,
 	}
 	var args []ast.Expr
-	paramsList := make([]*ast.Field, len(decl.Type.Params.List))
-	for i, param := range decl.Type.Params.List {
+	paramsList := make([]*ast.Field, len(fnType.Params.List))
+	for i, param := range fnType.Params.List {
 		paramsList[i] = param
 		for i := range param.Names {
 			args = append(args, param.Names[i])

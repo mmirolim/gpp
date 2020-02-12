@@ -123,6 +123,7 @@ func parseDir(dir string) error {
 			packages.NeedFiles |
 			packages.NeedSyntax |
 			packages.NeedTypes |
+			packages.NeedTypesInfo |
 			packages.NeedImports |
 			packages.NeedDeps,
 		Tests: true,
@@ -134,16 +135,14 @@ func parseDir(dir string) error {
 	if err != nil {
 		return err
 	}
-
 	for i := range pkgs {
 		if len(pkgs[i].Errors) > 0 {
 			fmt.Fprintln(os.Stderr, "\n=======\033[31m Build Failed \033[39m=======")
-			select {
-			case <-ctx.Done():
+			if ctx.Err() != nil {
 				fmt.Fprintln(os.Stderr, "task canceled")
+				fmt.Fprintln(os.Stderr, "\n============================")
 				err = errors.New("task canceled")
 				return err
-			default:
 			}
 			packages.PrintErrors(pkgs)
 			fmt.Fprintln(os.Stderr, "\n============================")
