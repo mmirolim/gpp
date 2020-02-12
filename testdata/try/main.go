@@ -12,10 +12,10 @@ func main() {
 	var result int
 	err := macro.Try_μ(func() error {
 		fname, _ := fStrError(false)
-		// should return here
 		_, result, _ = fPtrIntError(false)
 		NoErrReturn()
 		if result == 1 {
+			// should return here
 			fErr(true)
 		}
 		// should not reach here

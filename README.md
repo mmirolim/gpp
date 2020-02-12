@@ -12,15 +12,20 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 
  More examples in the testdata directory
  
- Try_μ let's to omit manual and tedious error checking (if err return err)
+ Try_μ let's to omit manual and tedious error checking (if err return err), inner statements also checked
  ```go
 	// failed on fPtrIntError
 	err := macro.Try_μ(func() error {
 		fname, _ := fStrError(false)
-		// should return here
-		_, result, _ = fPtrIntError(true)
+		_, result, _ = fPtrIntError(false)
+		
+		NoErrReturn() // does not return err, no need to check
+		
+		if result == 1 {
+		    // should return here
+			fErr(true) // returns err
+		}
 		// should not reach here
-		fErr(false)
 		fmt.Printf("fname %+v\n", fname) // output for debug
 		return nil
 	})
@@ -34,12 +39,21 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 		if err != nil {
 			return fmt.Errorf("fStrError: %w", err)
 		}
-		_, result, err = fPtrIntError(true)
+		_, result, err = fPtrIntError(false)
 		if err != nil {
 			return fmt.Errorf("fPtrIntError: %w", err)
 		}
-		fErr(false)
-		fmt.Printf("fname %+v\n", fname)
+		NoErrReturn()
+		if result == 1 {
+			err = fErr(true)
+			if err != nil {
+				return fmt.Errorf("fErr: %w", err)
+			}
+		}
+		_, err = fmt.Printf("fname %+v\n", fname)
+		if err != nil {
+			return fmt.Errorf("fmt.Printf: %w", err)
+		}
 		return err
 	}()
   ```
@@ -60,7 +74,7 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 	fmt.Printf("/log/main.go:15 v1=%#v v2=%#v\n", v1, v2)
   ```
 
-  Map/Filter/Reduce operations on any slice type, they expand to loops and block statement on call site
+  Map/Filter/Reduce operations on any slice type, they expand to loops and block statement on-call site without using unsafe, interface{} or reflection so it is type safe and there is no significant performance loss
   
   ```go
 	fseq := []float64{100, 200, 300, 400, 500, 600}
@@ -84,9 +98,8 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 ## Edge cases
 
 - Early prototype
-- Dependencies should be vendored, if not vendored may overwrite source code libraries 
-  with expanded macroses
-- Macro functions should be directly used without assignment or any indirection
+- Macro functions and types should be used without assignment or any indirection
+- Dependencies should be vendored, if not may expand macros in the source code libraries 
 - Needs more extensive testing
 
 ## Benchmarks
