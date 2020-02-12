@@ -12,10 +12,7 @@ func Try_μ(fn interface{}) error {
 	return nil
 }
 
-// TODO gtr didn't find test to run for this function
-// Define rules to expand, like func signature, last lhs is err
-// which is checked and so on
-// TODO only closures or any function?
+// MacroTryExpand try macro expander
 func MacroTryExpand(
 	cur *astutil.Cursor,
 	parentStmt ast.Stmt,
@@ -37,12 +34,12 @@ func MacroTryExpand(
 	}
 	// expected assignstmt
 	pstmt := parentStmt.(*ast.AssignStmt)
-	// check all errors
 
 	// create new err variable
 	errDecl, errIdent := createDeclStmt(token.VAR, "err", &ast.Ident{Name: "error"})
 	var procRecur func([]ast.Stmt) []ast.Stmt
 	depth := 0
+	// check all errors in all statements recursively
 	procRecur = func(stmts []ast.Stmt) []ast.Stmt {
 		depth++
 		var bodyList []ast.Stmt

@@ -7,23 +7,28 @@ import (
 	"log"
 	"strings"
 
-	"github.com/kr/pretty"
 	"golang.org/x/tools/go/ast/astutil"
 )
 
+// type for fluent M/F/R api
 type seq_μ []_T
 
+// Func signatures for macro templates
 type _RF func(_T, _T, int) _T
 type _PF func(_T, int) bool
 type _MF func(_T, int) _T
 type _T interface{}
 type _G interface{}
 
+// NewSeq_μ constructs new sequence and scope
+// src must be slice and passed by value or pointer
 func NewSeq_μ(src interface{}) *seq_μ {
 	seq0 := []_T{}
 	return &seq_μ{seq0}
 }
 
+// Ret copy computed values from seq to out
+// out must be pointer to slice
 func (seq *seq_μ) Ret(out interface{}) {
 	output := &[]_T{}
 	res := []_T{}
@@ -32,6 +37,9 @@ func (seq *seq_μ) Ret(out interface{}) {
 	}
 }
 
+// Filter values by fn predicate
+// must be in form (val, index) func(_T [, int]) bool
+// index is optional
 func (seq *seq_μ) Filter(fn interface{}) *seq_μ {
 	f := (_PF)(nil)
 	in := []_T{}
@@ -40,6 +48,9 @@ func (seq *seq_μ) Filter(fn interface{}) *seq_μ {
 	return seq
 }
 
+// Map apply fn func to seq to generate new seq
+// must be in form func(_T [, int]) _T (any type)
+// index is optional
 func (seq *seq_μ) Map(fn interface{}) *seq_μ {
 	f := (_MF)(nil)
 	in := []_T{}
@@ -48,6 +59,10 @@ func (seq *seq_μ) Map(fn interface{}) *seq_μ {
 	return seq
 }
 
+// Reduce apply fn func to seq and returns accum
+// accum should be pointer type *_G
+// fn type func(_G, _T [, int]) _G
+// index is optional
 func (seq *seq_μ) Reduce(accum, fn interface{}) *seq_μ {
 	out := accum
 	f := (_RF)(nil)
@@ -56,6 +71,7 @@ func (seq *seq_μ) Reduce(accum, fn interface{}) *seq_μ {
 	return seq
 }
 
+// Filter_μ (in, out) pointers to slices and fn func(_T [, int]) bool
 func Filter_μ(in, out, fn interface{}) {
 	input := []_T{}
 	res := &([]_T{})
@@ -67,6 +83,7 @@ func Filter_μ(in, out, fn interface{}) {
 	}
 }
 
+// Map_μ (in, out) pointers to slices and fn func(_T [, int]) _G
 func Map_μ(in, out, fn interface{}) {
 	input := []_T{}
 	res := &([]_T{})
@@ -76,6 +93,7 @@ func Map_μ(in, out, fn interface{}) {
 	}
 }
 
+// Reduce_μ in pointer/value to slice, out pointer *_G and fn func(_G, _T [, int]) _G
 func Reduce_μ(in, out, fn interface{}) {
 	input := []_T{}
 	accum := (*_T)(nil)
@@ -85,7 +103,7 @@ func Reduce_μ(in, out, fn interface{}) {
 	}
 }
 
-// special rules
+// MacroNewSeq macro expander for sequence M/F/R
 func MacroNewSeq(
 	cur *astutil.Cursor,
 	parentStmt ast.Stmt,
@@ -101,8 +119,6 @@ func MacroNewSeq(
 	for i := 0; i < len(idents); i++ {
 		ident := idents[i]
 		// check if ident has return type
-		// TODO what to do if obj literal used? Prohibit from constructing
-		// by unexported field?
 		var funDecl *ast.FuncDecl
 		if ident.Obj == nil {
 			name := fmt.Sprintf("%s.%s", Seq_μTypeSymbol, ident.Name)
@@ -151,7 +167,7 @@ func MacroNewSeq(
 						decl := obj.Decl.(*ast.FuncDecl)
 						funcType = decl.Type
 					} else {
-						fmt.Printf("Currently unsupported Expr for MFR %# v\n", pretty.Formatter(fn))
+						fmt.Printf("Currently unsupported Expr for MFR %T\n", fn)
 						return false
 					}
 				}
@@ -253,7 +269,7 @@ func MacroNewSeq(
 	return true
 }
 
-// copies params
+// wrapExprToFuncLit contruct func literal to wrap func to modify it
 // TODO results should be copied with changed
 func wrapExprToFuncLit(fnExpr ast.Expr, fnType *ast.FuncType) *ast.FuncLit {
 	fnLit := &ast.FuncLit{}

@@ -12,6 +12,7 @@ import (
 func Log_μ(args ...interface{}) {
 }
 
+// MacroLogExpand transformer for Log_μ
 func MacroLogExpand(
 	cur *astutil.Cursor,
 	parentStmt ast.Stmt,
@@ -26,6 +27,7 @@ func MacroLogExpand(
 	}
 	// construct fmt.Printf()
 	fmtExpr := &ast.SelectorExpr{
+		// TODO handle when import renamed
 		X:   &ast.Ident{Name: "fmt"},
 		Sel: &ast.Ident{Name: "Printf"},
 	}
@@ -66,6 +68,7 @@ func MacroLogExpand(
 	callExpr := createCallExpr(fmtExpr, args)
 	cur.InsertAfter(&ast.ExprStmt{X: callExpr})
 	astutil.AddImport(ApplyState.Fset, ApplyState.File, "fmt")
+
 	// expand body macros
 	astutil.Apply(callExpr, pre, post)
 	cur.Delete()

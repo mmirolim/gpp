@@ -2,6 +2,9 @@ package macro
 
 import "fmt"
 
+// Convenience macros
+
+// MapKeys_μ returns map keys
 func MapKeys_μ(keys, m interface{}) {
 	slKeys := &[]_T{}
 	dic := map[_T]_G{}
@@ -10,6 +13,7 @@ func MapKeys_μ(keys, m interface{}) {
 	}
 }
 
+// MapVals_μ returns map values
 func MapVals_μ(vals, m interface{}) {
 	slVals := &[]_T{}
 	dic := map[_T]_G{}
@@ -18,6 +22,7 @@ func MapVals_μ(vals, m interface{}) {
 	}
 }
 
+// MapToSlice_μ apply f to elements of m to generate sl
 func MapToSlice_μ(sl, m, f interface{}) {
 	slice := &[]interface{}{}
 	dic := map[_T]_G{}
@@ -27,11 +32,13 @@ func MapToSlice_μ(sl, m, f interface{}) {
 	}
 }
 
+// PrintMap_μ prints map
 func PrintMap_μ(m interface{}) {
 	arg2 := map[_T]_G{}
 	PrintMapf_μ("%v : %v\n", arg2)
 }
 
+// PrintMapf_μ prints map in f format
 func PrintMapf_μ(f string, m interface{}) {
 	arg1 := f
 	arg2 := map[_T]_G{}
@@ -40,6 +47,7 @@ func PrintMapf_μ(f string, m interface{}) {
 	}
 }
 
+// PrintMapKeys_μ prints provided keys and values
 func PrintMapKeys_μ(keys, m interface{}) {
 	arg1 := []_T{}
 	arg2 := map[_T]_G{}

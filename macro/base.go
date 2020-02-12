@@ -46,6 +46,7 @@ var MacroExpanders = map[string]MacroExpander{
 
 var MacroDecl = map[string]*ast.FuncDecl{}
 
+// MacroExpander expander function type
 type MacroExpander func(cur *astutil.Cursor,
 	parentStmt ast.Stmt,
 	idents []*ast.Ident,
@@ -53,6 +54,7 @@ type MacroExpander func(cur *astutil.Cursor,
 	pre, post astutil.ApplyFunc,
 ) bool
 
+// PrintSlice_μ --
 func PrintSlice_μ(sl interface{}) {
 	arg1 := []_T{}
 	for i := range arg1 {
@@ -60,6 +62,7 @@ func PrintSlice_μ(sl interface{}) {
 	}
 }
 
+// AllMacroDecl collects func decl of macros
 func AllMacroDecl(f *ast.File, allMacroDecl map[string]*ast.FuncDecl) {
 	for _, decl := range f.Decls {
 		fnDecl, ok := decl.(*ast.FuncDecl)
@@ -98,6 +101,164 @@ func AllMacroDecl(f *ast.File, allMacroDecl map[string]*ast.FuncDecl) {
 	}
 }
 
+// Pre ApplyFunc for ast processing
+func Pre(cur *astutil.Cursor) bool {
+	n := cur.Node()
+	if funDecl, ok := n.(*ast.FuncDecl); ok {
+		ApplyState.IsOuterMacro = IsMacroDecl(funDecl)
+	}
+	// do not expand in macro func declarations
+	if ApplyState.IsOuterMacro {
+		return false
+	}
+	var parentStmt ast.Stmt
+	var callExpr *ast.CallExpr
+	// as standalone expr
+	if estmt, ok := n.(*ast.ExprStmt); ok {
+		if cexp, ok := estmt.X.(*ast.CallExpr); ok {
+			parentStmt = estmt
+			callExpr = cexp
+		}
+	}
+	// in assignment
+	if assign, ok := n.(*ast.AssignStmt); ok {
+		for i := range assign.Rhs {
+			if cexp, ok := assign.Rhs[i].(*ast.CallExpr); ok {
+				parentStmt = assign
+				callExpr = cexp
+			}
+		}
+
+	}
+
+	if callExpr == nil {
+		return true
+	}
+	var callArgs [][]ast.Expr
+	var idents []*ast.Ident
+	IdentsFromCallExpr(&idents, &callArgs, callExpr)
+	if len(idents) == 0 {
+		// skip unhandled cases
+		return true
+	}
+	// first ident
+	ident := idents[0]
+	// skip lib prefix
+	if ident.Name == "macro" {
+		idents = idents[1:]
+		ident = idents[0]
+	}
+
+	if ident.Obj == nil || ident.Obj.Decl == nil {
+		// TODO define func
+		// check in macro decls
+		if strings.HasSuffix(ident.Name, MacroSymbol) {
+			ident.Obj = &ast.Object{
+				Name: ident.Name,
+				Decl: MacroDecl[ident.Name],
+			}
+		} else if ident.Name == "macro" {
+			name := fmt.Sprintf("%s.%s", ident.Name, idents[1].Name)
+			ident.Obj = &ast.Object{
+				Name: name,
+				Decl: MacroDecl[name],
+			}
+		} else {
+			return true
+		}
+	}
+
+	macroTypeName := ""
+	if decl, ok := ident.Obj.Decl.(*ast.FuncDecl); ok {
+		// TODO construct for not only star expressions or any selector?
+		if decl != nil && decl.Type.Results != nil && decl.Type.Results.List[0] != nil {
+			expr, ok := decl.Type.Results.List[0].Type.(*ast.StarExpr)
+			if ok {
+				//  TODO use recursive solution
+				id := expr.X.(*ast.Ident)
+				if strings.HasSuffix(id.Name, MacroSymbol) {
+					macroTypeName = id.Name
+				}
+			}
+		}
+	}
+	// get expand func
+	if expand, ok := MacroExpanders[macroTypeName]; ok {
+		expand(cur, parentStmt, idents, callArgs, Pre, Post)
+	} else if expand, ok := MacroExpanders[ident.Name]; ok {
+		expand(cur, parentStmt, idents, callArgs, Pre, Post)
+	} else if strings.HasSuffix(ident.Name, MacroSymbol) {
+		MacroGeneralExpand(cur, parentStmt, idents, callArgs, Pre, Post)
+	}
+
+	return true
+}
+
+// Post ApplyFunc for ast processing
+func Post(cur *astutil.Cursor) bool {
+	return true
+}
+
+// MacroGeneralExpand default expander
+// TODO describe rules
+func MacroGeneralExpand(
+	cur *astutil.Cursor,
+	parentStmt ast.Stmt,
+	idents []*ast.Ident,
+	callArgs [][]ast.Expr,
+	pre, post astutil.ApplyFunc) bool {
+	var newSeqBlocks []ast.Stmt
+	var blocks []ast.Stmt
+
+	for i := 0; i < len(idents); i++ {
+		ident := idents[i]
+		if !strings.HasSuffix(ident.Name, MacroSymbol) {
+			continue
+		}
+		// check if ident has return type
+		var funDecl *ast.FuncDecl
+		var ok bool
+		// TODO handle other types, use Seq resolver
+		if funDecl, ok = ident.Obj.Decl.(*ast.FuncDecl); !ok {
+			fmt.Printf("WARN MacroGeneralExpand funDecl expected but got %+v\n", ident.Obj.Decl)
+			continue
+		}
+		body := copyBodyStmt(len(callArgs[i]),
+			funDecl.Body, true)
+		// find all body args defined as assignments
+		var bodyArgs []*ast.AssignStmt
+		for _, ln := range body.List {
+			if st, ok := ln.(*ast.AssignStmt); ok {
+				bodyArgs = append(bodyArgs, st)
+			}
+		}
+
+		// TODO check that number of args is correct
+		// switch Rhs with call args
+		for i, carg := range callArgs[i] {
+			bodyArgs[i].Rhs = []ast.Expr{carg}
+		}
+		// expand body macros
+		astutil.Apply(body, pre, post)
+		blocks = append(blocks, body)
+
+	}
+	if len(blocks) > 0 {
+		blockStmt := new(ast.BlockStmt)
+		blockStmt.Lbrace = cur.Node().End()
+		if newSeqBlocks != nil {
+			blockStmt.List = append(blockStmt.List, newSeqBlocks...)
+			newSeqBlocks = nil
+		}
+		blockStmt.List = append(blockStmt.List, blocks...)
+		// insert as one block
+		cur.InsertAfter(blockStmt)
+		cur.Delete()
+	}
+
+	return true
+}
+
 func createCallExpr(fun ast.Expr, args []ast.Expr) *ast.CallExpr {
 	expr := &ast.CallExpr{
 		Fun:  fun,
@@ -129,7 +290,7 @@ func createAssignStmt(lhs, rhs []ast.Expr, tok token.Token) *ast.AssignStmt {
 	return stmt
 }
 
-// fnNameFromCallExpr returns name of func/method call
+// FnNameFromCallExpr returns name of func/method call
 // from ast.CallExpr
 // TODO test with closure()().Method and arr[i].Param.Method calls
 func FnNameFromCallExpr(fn *ast.CallExpr) (string, error) {
@@ -149,10 +310,8 @@ func FnNameFromCallExpr(fn *ast.CallExpr) (string, error) {
 			fname, err := FnNameFromCallExpr(v)
 			return fname + "." + expr.Sel.Name, err
 		default:
-			fmt.Printf("combine: unexpected AST %# v\n", pretty.Formatter(v)) // output for debug
 			out, err := FormatNode(v)
-			fmt.Printf("Err node print err %v out %+v\n", err, out) // output for debug
-
+			fmt.Printf("Err node print err %v out %+v\n", err, out)
 			return "", fmt.Errorf("unexpected value %T", v)
 		}
 	}
@@ -174,7 +333,7 @@ func FnNameFromCallExpr(fn *ast.CallExpr) (string, error) {
 	return fname, nil
 }
 
-// TODO define better name, creates only assignment statements
+// copyBOdyStmt only creates assignment statements
 // shallow copy with new assignable statements
 func copyBodyStmt(argNum int, body *ast.BlockStmt, noreturns bool) *ast.BlockStmt {
 	block := new(ast.BlockStmt)
@@ -189,7 +348,6 @@ func copyBodyStmt(argNum int, body *ast.BlockStmt, noreturns bool) *ast.BlockStm
 		// copy
 		block.List = append(block.List, st)
 	}
-	// TODO handle return on macros returning func
 	if len(body.List) == 0 || !noreturns {
 		return block
 	}
@@ -232,7 +390,7 @@ func createDeclStmt(decTyp token.Token, name string, typ ast.Expr) (*ast.DeclStm
 	return stmt, ident
 }
 
-// TODO check with packages
+// IdentsFromCallExpr
 func IdentsFromCallExpr(idents *[]*ast.Ident, callArgs *[][]ast.Expr, expr *ast.CallExpr) {
 	switch v := expr.Fun.(type) {
 	case *ast.Ident:
@@ -253,28 +411,6 @@ func IdentsFromCallExpr(idents *[]*ast.Ident, callArgs *[][]ast.Expr, expr *ast.
 		return
 	}
 	*callArgs = append(*callArgs, expr.Args)
-}
-
-// TODO rename
-// returns copy of func literal
-func getFuncLit(decl *ast.FuncDecl) (*ast.FuncLit, bool) {
-	for _, st := range decl.Body.List {
-		if ret, ok := st.(*ast.ReturnStmt); ok && len(ret.Results) == 1 {
-			// only one function to return
-			if fn, ok := ret.Results[0].(*ast.FuncLit); ok {
-				return copyFuncLit(fn), true
-			}
-		}
-	}
-	return nil, false
-}
-
-func copyFuncLit(fn *ast.FuncLit) *ast.FuncLit {
-	cfn := new(ast.FuncLit)
-	cfn.Type = fn.Type // function type
-	// handle only one return statement
-	cfn.Body = copyBodyStmt(0, fn.Body, false)
-	return cfn
 }
 
 func objKindToTokenType(typ token.Token) ast.ObjKind {
@@ -327,6 +463,7 @@ func checkIsMacroIdent(name string, idents []*ast.Ident) bool {
 	return false
 }
 
+// FormatNode format to text
 func FormatNode(node ast.Node) (string, error) {
 	buf := new(bytes.Buffer)
 	err := format.Node(buf, token.NewFileSet(), node)
@@ -336,6 +473,8 @@ func FormatNode(node ast.Node) (string, error) {
 	return buf.String(), err
 }
 
+// resolveExpr create obj with func declaration from expr signature
+// TODO rename
 func resolveExpr(expr ast.Expr, curPkg *packages.Package) *ast.Object {
 	if sig, ok := curPkg.TypesInfo.TypeOf(expr).(*types.Signature); ok {
 		return &ast.Object{
@@ -413,66 +552,4 @@ func resolveIdentInPkg(ident *ast.Ident, pkg *packages.Package) *ast.Object {
 		}
 	}
 	return nil
-}
-
-// general rules
-// TODO describe rules
-func MacroGeneralExpand(
-	cur *astutil.Cursor,
-	parentStmt ast.Stmt,
-	idents []*ast.Ident,
-	callArgs [][]ast.Expr,
-	pre, post astutil.ApplyFunc) bool {
-	var newSeqBlocks []ast.Stmt
-	var blocks []ast.Stmt
-
-	for i := 0; i < len(idents); i++ {
-		ident := idents[i]
-		if !strings.HasSuffix(ident.Name, MacroSymbol) {
-			continue
-		}
-		// check if ident has return type
-		// TODO what to do if obj literal used? Prohibit from constructing
-		// by unexported field?
-		var funDecl *ast.FuncDecl
-		var ok bool
-		if funDecl, ok = ident.Obj.Decl.(*ast.FuncDecl); !ok {
-			log.Fatalf("funDecl expected but got %+v", ident.Obj.Decl)
-		}
-		// TODO refactor what checks needed
-		body := copyBodyStmt(len(callArgs[i]),
-			funDecl.Body, true)
-		// find all body args defined as assignments
-		var bodyArgs []*ast.AssignStmt
-		for _, ln := range body.List {
-			if st, ok := ln.(*ast.AssignStmt); ok {
-				bodyArgs = append(bodyArgs, st)
-			}
-		}
-
-		// TODO check that number of args is correct
-		// switch Rhs with call args
-		// TODO support multiple declaration in one line
-		for i, carg := range callArgs[i] {
-			bodyArgs[i].Rhs = []ast.Expr{carg}
-		}
-		// expand body macros
-		astutil.Apply(body, pre, post)
-		blocks = append(blocks, body)
-
-	}
-	if len(blocks) > 0 {
-		blockStmt := new(ast.BlockStmt)
-		blockStmt.Lbrace = cur.Node().End()
-		if newSeqBlocks != nil {
-			blockStmt.List = append(blockStmt.List, newSeqBlocks...)
-			newSeqBlocks = nil
-		}
-		blockStmt.List = append(blockStmt.List, blocks...)
-		// insert as one block
-		cur.InsertAfter(blockStmt)
-		cur.Delete()
-	}
-
-	return true
 }

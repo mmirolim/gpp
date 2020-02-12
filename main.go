@@ -21,27 +21,24 @@ import (
 
 var (
 	dst      = flag.String("C", ".", "working directory")
-	src      = filepath.Join(os.TempDir(), "gpp_temp_build_dir")
 	runFlag  = flag.Bool("run", false, "run run binary")
 	testFlag = flag.Bool("test", false, "test binary")
 	goArgs   = flag.String("args", "", "args to go")
+
+	// temp directory to use
+	src = filepath.Join(os.TempDir(), "gpp_temp_build_dir")
 )
 
-// Test macros as library
-// Test parsing whole application
-// go run/build
 func main() {
 	flag.Parse()
-	// parse file
-	// generate correct AST to insert
-	// pass to compiler
 	curDir, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("getwd error %+v", err)
 	}
 	base := filepath.Base(curDir)
 	src := filepath.Join(src, base)
-	// clean prev directory
+
+	// clean temp directory with source code
 	err = os.RemoveAll(src)
 	if err != nil {
 		log.Fatalf("remove all error %+v", err)
@@ -99,7 +96,6 @@ func main() {
 		log.Fatalf("cp error %+v", err)
 	}
 	if *runFlag {
-		// TODO pass flags
 		cmd = exec.Command("./" + base)
 		cmd.Args = append(cmd.Args, args...)
 		fmt.Printf("%+v\n", cmd.Args) // output for debug
@@ -112,8 +108,6 @@ func main() {
 	}
 }
 
-// packages should be vendored otherwise original lib/deps files will be
-// overwritten
 func parseDir(dir string) error {
 	ctx := context.Background()
 	cfg := &packages.Config{
@@ -177,7 +171,7 @@ func parseDir(dir string) error {
 			macro.ApplyState.Fset = pkg.Fset
 			macro.ApplyState.Pkg = pkg
 			macro.ApplyState.SrcDir = src
-			modifiedAST := astutil.Apply(file, pre, post)
+			modifiedAST := astutil.Apply(file, macro.Pre, macro.Post)
 			updatedFile := modifiedAST.(*ast.File)
 			astStr, err := macro.FormatNode(updatedFile)
 			if err != nil {
@@ -223,103 +217,4 @@ func removeMacroLibImport(file *ast.File) {
 			return
 		}
 	}
-}
-
-func pre(cur *astutil.Cursor) bool {
-	n := cur.Node()
-	// on macro define do not expand it
-	if funDecl, ok := n.(*ast.FuncDecl); ok {
-		macro.ApplyState.IsOuterMacro = macro.IsMacroDecl(funDecl)
-	}
-	// process AssignStmt
-	if macro.ApplyState.IsOuterMacro {
-		return false
-	}
-	var parentStmt ast.Stmt
-	var callExpr *ast.CallExpr
-	// as standalone expr
-	if estmt, ok := n.(*ast.ExprStmt); ok {
-		if cexp, ok := estmt.X.(*ast.CallExpr); ok {
-			parentStmt = estmt
-			callExpr = cexp
-		}
-	}
-	// in assignment
-	if assign, ok := n.(*ast.AssignStmt); ok {
-		for i := range assign.Rhs {
-			if cexp, ok := assign.Rhs[i].(*ast.CallExpr); ok {
-				parentStmt = assign
-				callExpr = cexp
-			}
-		}
-
-	}
-
-	if callExpr == nil {
-		return true
-	}
-	// apply macro expand rules
-	var callArgs [][]ast.Expr
-	var idents []*ast.Ident
-	macro.IdentsFromCallExpr(&idents, &callArgs, callExpr)
-	if len(idents) == 0 {
-		// skip unhandled cases
-		return true
-	}
-	// first ident
-	ident := idents[0]
-	// skip lib prefix
-	if ident.Name == "macro" {
-		idents = idents[1:]
-		ident = idents[0]
-	}
-
-	if ident.Obj == nil || ident.Obj.Decl == nil {
-		// TODO define func
-		// check in macro decls
-		if strings.HasSuffix(ident.Name, macro.MacroSymbol) {
-			ident.Obj = &ast.Object{
-				Name: ident.Name,
-				Decl: macro.MacroDecl[ident.Name],
-			}
-		} else if ident.Name == "macro" {
-			name := fmt.Sprintf("%s.%s", ident.Name, idents[1].Name)
-			ident.Obj = &ast.Object{
-				Name: name,
-				Decl: macro.MacroDecl[name],
-			}
-		} else {
-			return true
-		}
-	}
-
-	macroTypeName := ""
-	if decl, ok := ident.Obj.Decl.(*ast.FuncDecl); ok {
-		// TODO construct for not only star expressions
-		// can be selector?
-		if decl != nil && decl.Type.Results != nil && decl.Type.Results.List[0] != nil {
-			expr, ok := decl.Type.Results.List[0].Type.(*ast.StarExpr)
-			if ok {
-				//  TODO use recursive solution
-				id := expr.X.(*ast.Ident)
-				if strings.HasSuffix(id.Name, macro.MacroSymbol) {
-					macroTypeName = id.Name
-				}
-			}
-		}
-	}
-	// get expand func
-	if expand, ok := macro.MacroExpanders[macroTypeName]; ok {
-		expand(cur, parentStmt, idents, callArgs, pre, post)
-	} else if expand, ok := macro.MacroExpanders[ident.Name]; ok {
-		expand(cur, parentStmt, idents, callArgs, pre, post)
-	} else if strings.HasSuffix(ident.Name, macro.MacroSymbol) {
-		macro.MacroGeneralExpand(cur, parentStmt, idents, callArgs, pre, post)
-	}
-
-	return true
-}
-
-func post(cur *astutil.Cursor) bool {
-	return true
 }
