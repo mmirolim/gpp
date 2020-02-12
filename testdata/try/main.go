@@ -5,30 +5,38 @@ import (
 	"fmt"
 
 	"github.com/mmirolim/gpp/macro"
+	"github.com/mmirolim/gpp/testdata/try/lib"
 )
 
 func main() {
 	var result int
-	// failed on fPtrIntError
 	err := macro.Try_μ(func() error {
 		fname, _ := fStrError(false)
 		// should return here
-		_, result, _ = fPtrIntError(true)
+		_, result, _ = fPtrIntError(false)
+		NoErrReturn()
+		fErr(true)
 		// should not reach here
-		fErr(false)
 		fmt.Printf("fname %+v\n", fname) // output for debug
 		return nil
 	})
 	fmt.Println("")
 	fmt.Printf("(result, err) = (%d, %+v)\n", result, err)
+	var recs [][]string
+	var bs []*lib.B
 	err = macro.Try_μ(func() error {
 		_, _ = fStrError(false)
 		_, result, _ = fPtrIntError(false)
 		fErr(false)
+		macro.NewSeq_μ(recs).Map(lib.NewB).Ret(&bs)
 		// should return here
 		return nil
 	})
 	fmt.Printf("(result, err) = (%d, %+v)\n", result, err)
+}
+
+func NoErrReturn() string {
+	return "return is not an error"
 }
 
 func fStrError(toError bool) (string, error) {

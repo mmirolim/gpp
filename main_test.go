@@ -11,7 +11,7 @@ import (
 
 func TestMacro(t *testing.T) {
 	// Setup start
-	testDir := filepath.Join(os.TempDir(), "gm-test-macro")
+	testDir := filepath.Join(os.TempDir(), "gpp-test-macro")
 	// clean before running
 	os.RemoveAll(testDir)
 	err := os.MkdirAll(testDir, 0700)
@@ -53,7 +53,7 @@ NewSeq res [2] sum even 12 mult even 48
 			desc:    "Test try_μ",
 			testDir: filepath.Join(testDir, "try"),
 			output: `
-(result, err) = (0, fPtrIntError: fPtrIntError error)
+(result, err) = (1, fErr: fErr error)
 (result, err) = (1, <nil>)
 `,
 			err: nil,
@@ -62,9 +62,9 @@ NewSeq res [2] sum even 12 mult even 48
 			desc:    "Test log_μ",
 			testDir: filepath.Join(testDir, "log"),
 			output: `
-/tmp/gm-test-macro/testdata/log/main.go:14 result before result=0
-/tmp/gm-test-macro/testdata/log/main.go:16 result after result=10
-/tmp/gm-test-macro/testdata/log/main.go:19 try err err=<nil>
+/tmp/gpp-test-macro/testdata/log/main.go:14 result before result=0
+/tmp/gpp-test-macro/testdata/log/main.go:16 result after result=10
+/tmp/gpp-test-macro/testdata/log/main.go:19 try err err=<nil>
 `,
 			err: nil,
 		},

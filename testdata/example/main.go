@@ -26,7 +26,6 @@ func main() {
 			dateTime, _ := time.Parse(dateFormat, d)
 			return dateTime
 		}).Ret(&dates)
-
 		recs = recs[1:]
 		macro.NewSeq_μ(recs).Map(NewRecord).Ret(&records)
 		return nil
