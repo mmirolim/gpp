@@ -12,7 +12,7 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 
  More examples in the testdata directory
  
- Try_μ let's to omit manual and tedious error checking (if err return err), inner statements also checked
+ Try_μ macro helps to omit manual and tedious error checking (if err return err), let's you focus on main code flow and guard the whole code blocks (inner blocks also checked) without polluting every line with checks
  ```go
 	// fails on fErr
 	err := macro.Try_μ(func() error {
