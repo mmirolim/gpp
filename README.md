@@ -12,7 +12,9 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 
  More examples in the testdata directory
  
- Try_μ macro helps to omit manual and tedious error checking (if err return err), let's you focus on main code flow and guard the whole code blocks (inner blocks also checked) without polluting every line with checks
+ Try_μ macro helps to omit manual and tedious error checking (if err return err), let's you focus on main code flow and guard the whole code blocks (inner blocks also checked) without polluting every line with checks. 
+ Errors wrapped with fmt.Errorf %w verb and can be investigated and handled after the try block.
+ 
  ```go
 	// fails on fErr
 	err := macro.Try_μ(func() error {
@@ -29,15 +31,20 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 		fmt.Printf("fname %+v\n", fname) // output for debug
 		return nil
 	})
+	
+	// here you can handle particular errors 
+	if errors.Is(err, SomeError) { someErrorHandler }
+	if errors.Is(err, ErrPermission) { permissionErrHandler}
+	
   ```	
-  Expands to 
+  Try_μ macro expands to
   
   ```go
 	err := func() error {
 		var err error
 		fname, err := fStrError(false)
 		if err != nil {
-			return fmt.Errorf("fStrError: %w", err)
+			return fmt.Errorf("fStrError: %w", err) // append callexpr and wrap error
 		}
 		_, result, err = fPtrIntError(false)
 		if err != nil {
@@ -56,6 +63,7 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 		}
 		return err
 	}()
+	
   ```
 	
 	
