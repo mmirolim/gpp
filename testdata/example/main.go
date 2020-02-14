@@ -14,35 +14,48 @@ import (
 )
 
 func main() {
-	fmt.Println("Coronavirus 2019 Time Series Data")
-	var dates []time.Time
-	var records []Record
+	fmt.Println("Coronavirus 2020 Time Series Data")
+
+	var recordLines [][]string
 	err := macro.Try_μ(func() error {
 		resp, _ := http.Get(link)
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("get failed status %d", resp.StatusCode)
+		}
 		r := csv.NewReader(resp.Body)
-		recs, _ := r.ReadAll()
-		// get dates from header
-		macro.NewSeq_μ(recs[0][4:]).Map(func(d string) time.Time {
-			dateTime, _ := time.Parse(dateFormat, d)
-			return dateTime
-		}).Ret(&dates)
-		recs = recs[1:]
-		macro.NewSeq_μ(recs).Map(NewRecord).Ret(&records)
+		recordLines, _ = r.ReadAll()
 		return nil
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	// get dates from header
+	var dates []time.Time
+	macro.NewSeq_μ(recordLines[0][4:]).Map(func(d string) time.Time {
+		dateTime, _ := time.Parse(dateFormat, d)
+		return dateTime
+	}).Ret(&dates)
+
+	// convert lines to records
+	var records []Record
+	recordLines = recordLines[1:]
+	macro.NewSeq_μ(recordLines).Map(NewRecord).Ret(&records)
+
 	totalByCountry := map[string]int{}
 	totalCases := 0
+	longestName := ""
 	macro.NewSeq_μ(records).
 		Reduce(&totalByCountry, func(acc mapStrInt, r Record) mapStrInt {
+			// compute total by country
 			acc[r.Country] += int(r.Dates[len(r.Dates)-1].Number)
+			// compute total number of case
+			totalCases += int(r.Dates[len(r.Dates)-1].Number)
+			// find longest country name, used for print formating
+			if len(r.Country) > len(longestName) {
+				longestName = r.Country
+			}
 			return acc
-		}).
-		Reduce(&totalCases, func(acc int, r Record) int {
-			return acc + int(r.Dates[len(r.Dates)-1].Number)
 		})
 
 	macro.Log_μ(">> Total Number of Cases", totalCases)
@@ -50,51 +63,50 @@ func main() {
 		date  time.Time
 		cases int
 	}
-	casesByDates := make([]casesByDate, len(dates))
-	macro.NewSeq_μ(casesByDates).Map(func(v casesByDate, i int) casesByDate {
-		macro.NewSeq_μ(records).
-			Reduce(&casesByDates[i].cases, func(acc int, r Record) int {
-				return acc + int(r.Dates[i].Number)
-			})
-		casesByDates[i].date = dates[i]
-		return casesByDates[i]
-	})
-	var cbd []string
-	macro.NewSeq_μ(casesByDates).Map(func(v casesByDate, i int) string {
-		bar := make([]byte, int(math.Log2(float64(casesByDates[i].cases))))
-		macro.NewSeq_μ(bar).Map(func(ch byte, i int) byte {
-			bar[i] = '*'
-			return bar[i]
-		})
-		return fmt.Sprintf("%s %s %d",
-			casesByDates[i].date.Format("01/02/06"),
-			string(bar), casesByDates[i].cases)
-	}).Ret(&cbd)
-	macro.Log_μ(">> Log Scale")
-	macro.PrintSlice_μ(cbd)
-
-	var countries []string
-	macro.MapKeys_μ(&countries, totalByCountry)
-	var longestName string
-	macro.NewSeq_μ(countries).Reduce(&longestName, func(l, c string) string {
-		if len(c) > len(l) {
-			return c
-		}
-		return l
-	})
-
-	sort.Strings(countries)
 	spaces := make([]byte, len(longestName))
 	macro.NewSeq_μ(spaces).Map(func(ch byte, i int) byte {
 		spaces[i] = ' '
 		return spaces[i]
 	})
 
+	casesByDates := make([]casesByDate, len(dates))
+	var cbd []string
+	macro.NewSeq_μ(casesByDates).
+		Map(func(v casesByDate, i int) casesByDate {
+			// sum all cases by each day
+			macro.NewSeq_μ(records).
+				Reduce(&casesByDates[i].cases, func(acc int, r Record) int {
+					return acc + int(r.Dates[i].Number)
+				})
+			casesByDates[i].date = dates[i]
+			// assign to original slice
+			return casesByDates[i]
+		}).
+		Map(func(v casesByDate, i int) string {
+			// convert and format case to string
+			bar := make([]byte, int(math.Log2(float64(casesByDates[i].cases))))
+			macro.NewSeq_μ(bar).Map(func(ch byte, i int) byte {
+				bar[i] = '*'
+				return bar[i]
+			})
+			return fmt.Sprintf("%s %s %d",
+				casesByDates[i].date.Format("01/02/06"),
+				string(bar), casesByDates[i].cases)
+		}).
+		Ret(&cbd)
+
+	macro.Log_μ(">> Log Scale")
+	macro.PrintSlice_μ(cbd)
+
+	var countries []string
+	macro.MapKeys_μ(&countries, totalByCountry)
+	sort.Strings(countries)
+
 	macro.Log_μ(">> Sorted by country\n")
-	macro.NewSeq_μ(countries).Map(func(c string) bool {
+	macro.NewSeq_μ(countries).Reduce(&err, func(e error, c string) error {
 		fmt.Printf("%s%s : %d\n",
 			c, string(spaces[len(c):]), totalByCountry[c])
-		return true
+		return nil
 	})
 
 	var css []countryCases
@@ -106,15 +118,15 @@ func main() {
 	})
 
 	macro.Log_μ(">> Sorted by number of cases\n")
-	macro.NewSeq_μ(css).Map(func(c countryCases) bool {
+	macro.NewSeq_μ(css).Reduce(&err, func(e error, c countryCases) error {
 		fmt.Printf("%s%s : %d\n",
 			c.Country, string(spaces[len(c.Country):]), c.Cases)
-		return true
+		return nil
 	})
 }
 
 const (
-	link       = "https://raw.githubusercontent.com/CSSEGISandData/2019-nCoV/master/time_series/time_series_2019-ncov-Confirmed.csv"
+	link       = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/archived_data/time_series/time_series_2019-ncov-Confirmed.csv"
 	dateFormat = "1/2/06 15:04"
 )
 
