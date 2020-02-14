@@ -75,9 +75,27 @@ func main() {
 
 	var countries []string
 	macro.MapKeys_μ(&countries, totalByCountry)
+	var longestName string
+	macro.NewSeq_μ(countries).Reduce(&longestName, func(l, c string) string {
+		if len(c) > len(l) {
+			return c
+		}
+		return l
+	})
+
 	sort.Strings(countries)
-	macro.Log_μ(">> Sorted by country")
-	macro.PrintMapKeys_μ(countries, totalByCountry)
+	spaces := make([]byte, len(longestName))
+	macro.NewSeq_μ(spaces).Map(func(ch byte, i int) byte {
+		spaces[i] = ' '
+		return spaces[i]
+	})
+
+	macro.Log_μ(">> Sorted by country\n")
+	macro.NewSeq_μ(countries).Map(func(c string) bool {
+		fmt.Printf("%s%s : %d\n",
+			c, string(spaces[len(c):]), totalByCountry[c])
+		return true
+	})
 
 	var css []countryCases
 	macro.MapToSlice_μ(&css, totalByCountry,
@@ -86,8 +104,13 @@ func main() {
 	sort.Slice(css, func(i, j int) bool {
 		return css[i].Cases > css[j].Cases
 	})
-	macro.Log_μ(">> Sorted by number of cases")
-	macro.PrintSlice_μ(css)
+
+	macro.Log_μ(">> Sorted by number of cases\n")
+	macro.NewSeq_μ(css).Map(func(c countryCases) bool {
+		fmt.Printf("%s%s : %d\n",
+			c.Country, string(spaces[len(c.Country):]), c.Cases)
+		return true
+	})
 }
 
 const (
