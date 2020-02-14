@@ -12,6 +12,9 @@ import (
 func Log_μ(args ...interface{}) {
 }
 
+// LogFuncStubName used as stub to mute unmatched log lines
+const LogFuncStubName = "__nooplog_"
+
 // MacroLogExpand transformer for Log_μ
 func MacroLogExpand(
 	cur *astutil.Cursor,
@@ -25,19 +28,34 @@ func MacroLogExpand(
 	if len(callArgs[0]) == 0 {
 		return false
 	}
+	pos := idents[0].Pos()
+	fileInfo := ApplyState.Fset.File(pos)
+	fileAndPos := fmt.Sprintf("%s:%d ",
+		strings.TrimPrefix(fileInfo.Name(), ApplyState.SrcDir),
+		fileInfo.Line(idents[0].Pos()))
+
+	// if enabled check match
+	if ApplyState.LogRe != nil && !ApplyState.LogRe.MatchString(fileAndPos) {
+		// remove
+		if stmt, ok := cur.Node().(*ast.ExprStmt); ok {
+			if callExpr, ok := stmt.X.(*ast.CallExpr); ok {
+				if selExpr, ok := callExpr.Fun.(*ast.SelectorExpr); ok {
+					selExpr.Sel.Name = LogFuncStubName
+					callExpr.Fun = selExpr.Sel
+				}
+			}
+		}
+		return false
+	}
 	// construct fmt.Printf()
 	fmtExpr := &ast.SelectorExpr{
 		// TODO handle when import renamed
 		X:   &ast.Ident{Name: "fmt"},
 		Sel: &ast.Ident{Name: "Printf"},
 	}
-	pos := idents[0].Pos()
-	fileInfo := ApplyState.Fset.File(pos)
 	fmtCfg := &ast.BasicLit{
-		Kind: token.STRING,
-		Value: fmt.Sprintf("%s:%d ",
-			strings.TrimPrefix(fileInfo.Name(), ApplyState.SrcDir),
-			fileInfo.Line(idents[0].Pos())),
+		Kind:  token.STRING,
+		Value: fileAndPos,
 	}
 	var args []ast.Expr
 	args = append(args, fmtCfg)
@@ -73,4 +91,26 @@ func MacroLogExpand(
 	astutil.Apply(callExpr, pre, post)
 	cur.Delete()
 	return true
+}
+
+func CreateNoOpFuncDecl(name string) *ast.FuncDecl {
+	decl := &ast.FuncDecl{
+		Name: ast.NewIdent(name),
+		Type: &ast.FuncType{
+			Params: &ast.FieldList{
+				List: []*ast.Field{
+					{
+						Names: []*ast.Ident{ast.NewIdent("args")},
+						Type: &ast.Ellipsis{
+							Elt: &ast.InterfaceType{
+								Methods: &ast.FieldList{},
+							},
+						},
+					},
+				},
+			},
+		},
+		Body: &ast.BlockStmt{},
+	}
+	return decl
 }

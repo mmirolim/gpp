@@ -12,37 +12,51 @@ import (
 func TestMacro(t *testing.T) {
 	// Setup start
 	testDir := filepath.Join(os.TempDir(), "gpp-test-macro")
+	goPathTest := filepath.Join(testDir, "go")
+	moduleName, err := getModuleName(".")
+	if err != nil {
+		t.Fatalf("getModuleName error %+v", err)
+	}
+	src := filepath.Join(goPathTest, "src", moduleName)
 	// clean before running
-	os.RemoveAll(testDir)
-	err := os.MkdirAll(testDir, 0700)
+	os.RemoveAll(src)
+	err = os.MkdirAll(src, 0700)
 	if err != nil {
 		t.Fatalf("MkdirAll error %+v", err)
 	}
-	defer func() {
-		if !t.Failed() {
-			// let check directory on fail
-			os.RemoveAll(testDir)
-		}
-	}()
-
-	testDataDir := filepath.Join("./", "testdata")
-	cmd := exec.Command("cp", "-r", testDataDir, testDir)
+	cmd := exec.Command("cp", "-r", ".", src)
 	err = cmd.Run()
 	if err != nil {
 		t.Fatalf("cp error %+v", err)
 	}
-	testDir = filepath.Join(testDir, "testdata")
+	curDir, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("getwd error %+v", err)
+	}
+	err = os.Chdir(src)
+	if err != nil {
+		log.Fatalf("chdir %+v", err)
+	}
 	// Setup end
-
+	defer func() {
+		err = os.Chdir(curDir)
+		if err != nil {
+			log.Fatalf("chdir %+v", err)
+		}
+		if !t.Failed() {
+			// let check directory on fail
+			os.RemoveAll(src)
+		}
+	}()
 	cases := []struct {
-		desc    string
-		testDir string
-		output  string
-		err     error
+		desc   string
+		srcDir string
+		output string
+		err    error
 	}{
 		{
-			desc:    "Test NewSeq M/F/R fluent api",
-			testDir: filepath.Join(testDir, "newseq"),
+			desc:   "Test NewSeq M/F/R fluent api",
+			srcDir: filepath.Join(src, "testdata", "newseq"),
 			output: `
 NewSeq Map/Filter [{strLen:3} {strLen:4}]
 NewSeq res [2] sum even 12 mult even 48
@@ -50,8 +64,8 @@ NewSeq res [2] sum even 12 mult even 48
 			err: nil,
 		},
 		{
-			desc:    "Test try_μ",
-			testDir: filepath.Join(testDir, "try"),
+			desc:   "Test try_μ",
+			srcDir: filepath.Join(src, "testdata", "try"),
 			output: `
 (result, err) = (1, fErr: fErr error)
 (result, err) = (1, <nil>)
@@ -59,40 +73,40 @@ NewSeq res [2] sum even 12 mult even 48
 			err: nil,
 		},
 		{
-			desc:    "Test log_μ",
-			testDir: filepath.Join(testDir, "log"),
+			desc:   "Test log_μ",
+			srcDir: filepath.Join(src, "testdata", "log"),
 			output: `
-/tmp/gpp-test-macro/testdata/log/main.go:14 result before result=0
-/tmp/gpp-test-macro/testdata/log/main.go:16 result after result=10
-/tmp/gpp-test-macro/testdata/log/main.go:19 try err err=<nil>
+/main.go:15 result before result=0
+/main.go:17 result after result=10
+/main.go:20 try err err=<nil>
+/lib/lib.go:8 LogLibFunc val=20
+/main.go:21 log lib func result lib.LogLibFuncA=20
 `,
 			err: nil,
 		},
-		// 		{
-		// 			desc:    "Test Example application",
-		// 			testDir: filepath.Join(testDir, "example"),
-		// 			output: `
-		// TODO DEFINE
-		// `,
-		// 			err: nil,
-		// 		},
 	}
-
+	// TODO go get external packages to test gopath before running
 	var buf bytes.Buffer
 	for i, tc := range cases {
 		buf.Reset()
-		err = parseDir(tc.testDir)
+		err = parseDir(tc.srcDir, moduleName, nil)
 		if isUnexpectedErr(t, i, tc.desc, tc.err, err) {
 			continue
 		}
+		err = os.Chdir(tc.srcDir)
+		if err != nil {
+			log.Fatalf("chdir %+v", err)
+		}
 
-		cmd = exec.Command("go", "run", filepath.Join(tc.testDir, "main.go"))
+		cmd = exec.Command("go", "run", "main.go")
+		cmd.Env = append(os.Environ(), "GOPATH="+goPathTest)
 		cmd.Stdout = &buf
 		cmd.Stderr = &buf
 		err = cmd.Run()
 		output := buf.String()
-		if err != nil {
-			log.Fatalf("go run error %+v\n%s", err, output)
+		if isUnexpectedErr(t, i, tc.desc, nil, err) {
+			t.Errorf("cmd args %v\n%s", cmd.Args, output)
+			continue
 		}
 
 		if output != tc.output {

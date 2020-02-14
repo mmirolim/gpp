@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"go/types"
 	"log"
+	"regexp"
 	"strings"
 
 	"github.com/kr/pretty"
@@ -30,6 +31,7 @@ var ApplyState = struct {
 	Fset         *token.FileSet
 	Pkg          *packages.Package
 	SrcDir       string
+	LogRe        *regexp.Regexp
 }{}
 
 // define custom macro expand functions

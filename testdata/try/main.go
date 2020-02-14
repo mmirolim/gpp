@@ -4,8 +4,9 @@ import (
 	"errors"
 	"fmt"
 
+	"gpp.com/try/lib"
+
 	"github.com/mmirolim/gpp/macro"
-	"github.com/mmirolim/gpp/testdata/try/lib"
 )
 
 func main() {

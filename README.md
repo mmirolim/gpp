@@ -67,7 +67,8 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
   ```
 	
 	
-  Log_μ to log without paying the cost of runtime calls and indirections (will be possible to selectively enable/disable logging per file on preprocessing stage no need to manually guard logs call/remove them)
+  Log_μ to log without paying the cost of runtime calls and indirections.Logs can be selectively enabled/disabled on preprocessing stage no need to manually guard logs call/remove them. 
+  gpp -run -log=main.go:1[0-9] will enable logging only in main.go file on lines from 10-19.
   
   ```go
 	v1, v2  := 10, 20
@@ -109,7 +110,7 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 
 - Early prototype
 - Macro functions and types should be used without assignment or any indirection
-- Dependencies should be vendored, if not may expand macros in the source code libraries 
+- gpp copy all files to temp directory to parse, rewrite and build it, build may fail if dependencies not found and/or may take long time to load. Enabling go mod and vendoring may help to fix some issues.
 - Needs more extensive testing
 
 ## Benchmarks

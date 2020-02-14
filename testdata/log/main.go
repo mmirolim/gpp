@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/mmirolim/gpp/macro"
+	"gpp.com/log/lib"
 )
 
 func main() {
@@ -17,4 +18,5 @@ func main() {
 		return nil
 	})
 	macro.Log_μ("try err", err)
+	macro.Log_μ("log lib func result", lib.LogLibFuncA(20))
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -24,20 +25,27 @@ var (
 	runFlag  = flag.Bool("run", false, "run run binary")
 	testFlag = flag.Bool("test", false, "test binary")
 	goArgs   = flag.String("args", "", "args to go")
-
+	logFlag  = flag.String("log", "", "regex matching filename:line")
 	// temp directory to use
-	src = filepath.Join(os.TempDir(), "gpp_temp_build_dir")
+	gopath = filepath.Join(os.TempDir(), "gpp_temp_build_dir", "go")
+	logRe  *regexp.Regexp
 )
 
 func main() {
 	flag.Parse()
+	if *logFlag != "" {
+		logRe = regexp.MustCompile(*logFlag)
+	}
 	curDir, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("getwd error %+v", err)
 	}
-	base := filepath.Base(curDir)
-	src := filepath.Join(src, base)
-
+	moduleName, err := getModuleName(curDir)
+	if err != nil {
+		log.Fatalf("getModuleName %+v", err)
+	}
+	// source code path according to modulename
+	src := filepath.Join(gopath, "src", moduleName)
 	// clean temp directory with source code
 	err = os.RemoveAll(src)
 	if err != nil {
@@ -58,15 +66,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("chdir %+v", err)
 	}
-	err = parseDir(src)
+	err = parseDir(src, moduleName, logRe)
 	if err != nil {
 		log.Fatalf("parse dir error %+v", err)
 	}
+	// set gopath for cmd
+	envs := append(os.Environ(), "GOPATH="+gopath)
 	args := strings.Split(*goArgs, " ")
 	if *testFlag {
 		cmd = exec.Command("go", "test", "-v", "./...")
 		cmd.Args = append(cmd.Args, args...)
 		fmt.Printf("%+v\n", cmd.Args) // output for debug
+		cmd.Env = envs
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = cmd.Run()
@@ -78,6 +89,7 @@ func main() {
 		cmd = exec.Command("go", "build")
 		cmd.Args = append(cmd.Args, args...)
 		fmt.Printf("%+v\n", cmd.Args) // output for debug
+		cmd.Env = envs
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = cmd.Run()
@@ -90,6 +102,7 @@ func main() {
 		log.Fatalf("chdir %+v", err)
 	}
 	// copy binary back
+	base := filepath.Base(src)
 	cmd = exec.Command("cp", filepath.Join(src, base), base)
 	err = cmd.Run()
 	if err != nil {
@@ -99,6 +112,7 @@ func main() {
 		cmd = exec.Command("./" + base)
 		cmd.Args = append(cmd.Args, args...)
 		fmt.Printf("%+v\n", cmd.Args) // output for debug
+		cmd.Env = envs
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = cmd.Run()
@@ -108,7 +122,7 @@ func main() {
 	}
 }
 
-func parseDir(dir string) error {
+func parseDir(dir, moduleName string, logRe *regexp.Regexp) error {
 	ctx := context.Background()
 	cfg := &packages.Config{
 		Context: ctx,
@@ -129,6 +143,7 @@ func parseDir(dir string) error {
 	if err != nil {
 		return err
 	}
+
 	for i := range pkgs {
 		if len(pkgs[i].Errors) > 0 {
 			fmt.Fprintln(os.Stderr, "\n=======\033[31m Build Failed \033[39m=======")
@@ -144,15 +159,25 @@ func parseDir(dir string) error {
 			return err
 		}
 	}
-
 	var visitFailed bool
 	var loadMacroLibOnce sync.Once
+	if logRe != nil {
+		// insert nooplog stub
+		insertNoOpLogStub(pkgs)
+	}
 	packages.Visit(pkgs, func(pkg *packages.Package) bool {
+		// TODO do it in parallel
 		if visitFailed {
 			// skip imported packages on pkg fail
 			return true
 		}
+
 		for i, file := range pkg.Syntax {
+			// skip non local files
+			// TODO check net package have more pkg.Syntax than pkg.GoFiles
+			if i < len(pkg.GoFiles) && !strings.HasPrefix(pkg.GoFiles[i], dir) {
+				continue
+			}
 			if macroPkg, ok := pkg.Imports[macro.MacroPkgPath]; ok {
 				loadMacroLibOnce.Do(func() {
 					for _, file := range macroPkg.Syntax {
@@ -170,7 +195,8 @@ func parseDir(dir string) error {
 			macro.ApplyState.File = file
 			macro.ApplyState.Fset = pkg.Fset
 			macro.ApplyState.Pkg = pkg
-			macro.ApplyState.SrcDir = src
+			macro.ApplyState.SrcDir = dir
+			macro.ApplyState.LogRe = logRe
 			modifiedAST := astutil.Apply(file, macro.Pre, macro.Post)
 			updatedFile := modifiedAST.(*ast.File)
 			astStr, err := macro.FormatNode(updatedFile)
@@ -217,4 +243,41 @@ func removeMacroLibImport(file *ast.File) {
 			return
 		}
 	}
+}
+
+func insertNoOpLogStub(pkgs []*packages.Package) {
+	for _, pkg := range pkgs {
+		file := pkg.Syntax[0]
+		// and inject to decl
+		decl := macro.CreateNoOpFuncDecl(macro.LogFuncStubName)
+		file.Decls = append(file.Decls, decl)
+	}
+}
+
+// getModuleName returns module name
+// in gived workDir
+func getModuleName(workDir string) (string, error) {
+	data, err := ioutil.ReadFile(filepath.Join(workDir, "go.mod"))
+	if err != nil {
+		// get from GOPATH
+		gopath := os.Getenv("GOPATH")
+		if gopath == "" {
+			return "", errors.New("GOPATH and go.mod not found")
+		}
+		dir, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Rel(filepath.Join(gopath, "src"), dir)
+	}
+
+	var line []byte
+	for i := 0; i < len(data); i++ {
+		if data[i] == '\n' {
+			break
+		}
+		line = data[0 : i+1]
+	}
+
+	return strings.Split(string(line), " ")[1], nil
 }

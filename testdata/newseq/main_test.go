@@ -6,7 +6,7 @@ import (
 
 	"github.com/BurntSushi/ty/fun"
 	"github.com/mmirolim/gpp/macro"
-	"github.com/mmirolim/gpp/testdata/newseq/lib"
+	"gpp.com/newseq/lib"
 )
 
 func TestNewSeqMacro(t *testing.T) {
