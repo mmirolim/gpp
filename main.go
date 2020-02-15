@@ -175,6 +175,15 @@ func parseDir(dir, moduleName string, logRe *regexp.Regexp) error {
 			if i < len(pkg.GoFiles) && !strings.HasPrefix(pkg.GoFiles[i], dir) {
 				continue
 			}
+
+			macro.ApplyState.IsOuterMacro = false
+			macro.ApplyState.File = file
+			macro.ApplyState.Fset = pkg.Fset
+			macro.ApplyState.Pkg = pkg
+			macro.ApplyState.SrcDir = dir
+			macro.ApplyState.LogRe = logRe
+			macro.ApplyState.MacroLibName = getMacroLibName(file)
+
 			if macroPkg, ok := pkg.Imports[macro.MacroPkgPath]; ok {
 				loadMacroLibOnce.Do(func() {
 					for _, file := range macroPkg.Syntax {
@@ -188,12 +197,6 @@ func parseDir(dir, moduleName string, logRe *regexp.Regexp) error {
 			removeMacroLibImport(file)
 			// remove comments
 			file.Comments = nil
-			macro.ApplyState.IsOuterMacro = false
-			macro.ApplyState.File = file
-			macro.ApplyState.Fset = pkg.Fset
-			macro.ApplyState.Pkg = pkg
-			macro.ApplyState.SrcDir = dir
-			macro.ApplyState.LogRe = logRe
 			modifiedAST := astutil.Apply(file, macro.Pre, macro.Post)
 			updatedFile := modifiedAST.(*ast.File)
 			astStr, err := macro.FormatNode(updatedFile)
@@ -277,4 +280,18 @@ func getModuleName(workDir string) (string, error) {
 	}
 
 	return strings.Split(string(line), " ")[1], nil
+}
+
+// getMacroLibName returns name of macro library in import
+func getMacroLibName(file *ast.File) string {
+	macroLibPath := fmt.Sprintf("\"%s\"", macro.MacroPkgPath)
+	for _, imprt := range file.Imports {
+		if imprt.Path.Value == macroLibPath {
+			if imprt.Name != nil {
+				return imprt.Name.Name
+			}
+			return macro.MacroPkgName
+		}
+	}
+	return ""
 }

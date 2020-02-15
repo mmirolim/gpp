@@ -4,15 +4,14 @@ import (
 	"errors"
 	"fmt"
 
+	mcr "github.com/mmirolim/gpp/macro"
 	"gpp.com/try/lib"
-
-	"github.com/mmirolim/gpp/macro"
 )
 
 func main() {
 	slf := []func() error{func() error { return nil }}
 	var result int
-	err := macro.Try_μ(func() error {
+	err := mcr.Try_μ(func() error {
 		fname, _ := fStrError(false)
 		_, result, _ = fPtrIntError(false)
 		slf[0]()
@@ -30,11 +29,11 @@ func main() {
 	fmt.Printf("(result, err) = (%d, %+v)\n", result, err)
 	var recs [][]string
 	var bs []*lib.B
-	err = macro.Try_μ(func() error {
+	err = mcr.Try_μ(func() error {
 		_, _ = fStrError(false)
 		_, result, _ = fPtrIntError(false)
 		fErr(false)
-		macro.NewSeq_μ(recs).Map(lib.NewB).Ret(&bs)
+		mcr.NewSeq_μ(recs).Map(lib.NewB).Ret(&bs)
 		// should return here
 		return nil
 	})

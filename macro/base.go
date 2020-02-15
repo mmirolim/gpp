@@ -22,16 +22,18 @@ const (
 	Try_μSymbol     = "Try_μ"
 	Log_μSymbol     = "Log_μ"
 	MacroPkgPath    = "github.com/mmirolim/gpp/macro"
+	MacroPkgName    = "macro"
 )
 
 // TODO move to context?
 var ApplyState = struct {
-	IsOuterMacro bool
+	MacroLibName string
 	File         *ast.File
 	Fset         *token.FileSet
 	Pkg          *packages.Package
 	SrcDir       string
 	LogRe        *regexp.Regexp
+	IsOuterMacro bool
 }{}
 
 // define custom macro expand functions
@@ -146,7 +148,7 @@ func Pre(cur *astutil.Cursor) bool {
 	// first ident
 	ident := idents[0]
 	// skip lib prefix
-	if ident.Name == "macro" {
+	if ident.Name == ApplyState.MacroLibName {
 		idents = idents[1:]
 		ident = idents[0]
 	}
