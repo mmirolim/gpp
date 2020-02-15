@@ -129,6 +129,12 @@ func MacroNewSeq(
 	}
 	// reusable stmt
 	reuseSeqStmt := createAssignStmt(lhs, rhs, token.DEFINE)
+	// handle newseq call without chaining
+	if len(idents) == 1 && idents[0].Name == "NewSeq_μ" {
+		// used as variable, add import
+		ApplyState.RemoveLib = false
+		return true
+	}
 	for i := 0; i < len(idents); i++ {
 		reusePrevSeq := false
 		ident := idents[i]
@@ -252,6 +258,7 @@ func MacroNewSeq(
 				}
 			}
 		}
+
 		body := copyBodyStmt(len(callArgs[i]),
 			funDecl.Body, true)
 		// find all body args defined as assignments

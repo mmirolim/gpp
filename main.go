@@ -182,6 +182,7 @@ func parseDir(dir, moduleName string, logRe *regexp.Regexp) error {
 			macro.ApplyState.Pkg = pkg
 			macro.ApplyState.SrcDir = dir
 			macro.ApplyState.LogRe = logRe
+			macro.ApplyState.RemoveLib = true
 			macro.ApplyState.MacroLibName = getMacroLibName(file)
 
 			if macroPkg, ok := pkg.Imports[macro.MacroPkgPath]; ok {
@@ -194,11 +195,13 @@ func parseDir(dir, moduleName string, logRe *regexp.Regexp) error {
 				return true // no macro in package
 			}
 
-			removeMacroLibImport(file)
 			// remove comments
 			file.Comments = nil
 			modifiedAST := astutil.Apply(file, macro.Pre, macro.Post)
 			updatedFile := modifiedAST.(*ast.File)
+			if macro.ApplyState.RemoveLib {
+				removeMacroLibImport(updatedFile)
+			}
 			astStr, err := macro.FormatNode(updatedFile)
 			if err != nil {
 				fmt.Printf("format node err %+v\n", err) // output for debug

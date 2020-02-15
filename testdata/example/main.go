@@ -45,18 +45,19 @@ func main() {
 	totalByCountry := map[string]int{}
 	totalCases := 0
 	longestName := ""
-	macro.NewSeq_μ(records).
-		Reduce(&totalByCountry, func(acc mapStrInt, r Record) mapStrInt {
-			// compute total by country
-			acc[r.Country] += int(r.Dates[len(r.Dates)-1].Number)
-			// compute total number of case
-			totalCases += int(r.Dates[len(r.Dates)-1].Number)
-			// find longest country name, used for print formating
-			if len(r.Country) > len(longestName) {
-				longestName = r.Country
-			}
-			return acc
-		})
+	recordsSeq := macro.NewSeq_μ(records)
+
+	recordsSeq.Reduce(&totalByCountry, func(acc mapStrInt, r Record) mapStrInt {
+		// compute total by country
+		acc[r.Country] += int(r.Dates[len(r.Dates)-1].Number)
+		// compute total number of case
+		totalCases += int(r.Dates[len(r.Dates)-1].Number)
+		// find longest country name, used for print formating
+		if len(r.Country) > len(longestName) {
+			longestName = r.Country
+		}
+		return acc
+	})
 
 	macro.Log_μ(">> Total Number of Cases", totalCases)
 	type casesByDate struct {
@@ -74,10 +75,9 @@ func main() {
 	macro.NewSeq_μ(casesByDates).
 		Map(func(v casesByDate, i int) casesByDate {
 			// sum all cases by each day
-			macro.NewSeq_μ(records).
-				Reduce(&casesByDates[i].cases, func(acc int, r Record) int {
-					return acc + int(r.Dates[i].Number)
-				})
+			recordsSeq.Reduce(&casesByDates[i].cases, func(acc int, r Record) int {
+				return acc + int(r.Dates[i].Number)
+			})
 			casesByDates[i].date = dates[i]
 			// assign to original slice
 			return casesByDates[i]

@@ -19,6 +19,7 @@ import (
 const (
 	MacroSymbol     = "_μ"
 	Seq_μTypeSymbol = "seq_μ"
+	NewSeq_μSymbol  = "NewSeq_μ"
 	Try_μSymbol     = "Try_μ"
 	Log_μSymbol     = "Log_μ"
 	MacroPkgPath    = "github.com/mmirolim/gpp/macro"
@@ -28,6 +29,7 @@ const (
 // TODO move to context?
 var ApplyState = struct {
 	MacroLibName string
+	RemoveLib    bool
 	File         *ast.File
 	Fset         *token.FileSet
 	Pkg          *packages.Package
@@ -122,19 +124,27 @@ func Pre(cur *astutil.Cursor) bool {
 		// skip unhandled cases
 		return true
 	}
-	// first ident
-	ident := idents[0]
+
 	// skip lib prefix
-	if ident.Name == ApplyState.MacroLibName {
+	if idents[0].Name == ApplyState.MacroLibName {
 		idents = idents[1:]
-		ident = idents[0]
+	}
+	// TODO refactor
+	if !strings.HasSuffix(idents[0].Name, MacroSymbol) {
+		// maybe variable
+		newIdent, newCallArgs := handleVarToNewSeqMacro(idents[0])
+		if newIdent != nil {
+			idents[0] = newIdent
+			callArgs = append([][]ast.Expr{newCallArgs}, callArgs...)
+		}
 	}
 
-	decl := getMacroDeclByName(ident.Name)
+	decl := getMacroDeclByName(idents[0].Name)
 	if decl == nil {
 		return true
 	}
 	macroTypeName := getFirstTypeInReturn(decl)
+	ident := idents[0]
 	ident.Obj = &ast.Object{Name: ident.Name, Decl: decl}
 	// get expand func
 	if expand, ok := MacroExpanders[macroTypeName]; ok {
@@ -144,9 +154,30 @@ func Pre(cur *astutil.Cursor) bool {
 	} else if strings.HasSuffix(ident.Name, MacroSymbol) {
 		MacroGeneralExpand(cur, parentStmt, idents, callArgs, Pre, Post)
 	}
-
 	return true
 
+}
+
+func handleVarToNewSeqMacro(ident *ast.Ident) (*ast.Ident, []ast.Expr) {
+	if ident.Obj == nil {
+		return nil, nil
+	}
+	// TODO handle func
+	// TODO multiple assignment
+	if stmt, ok := ident.Obj.Decl.(*ast.AssignStmt); ok {
+		if cexp, ok := stmt.Rhs[0].(*ast.CallExpr); ok {
+			if sexp, ok := cexp.Fun.(*ast.SelectorExpr); ok {
+				if sexp.Sel.Name == NewSeq_μSymbol {
+					if muteIdent, ok := stmt.Lhs[0].(*ast.Ident); ok {
+						muteIdent.Name = "_"
+						stmt.Tok = token.ASSIGN
+					}
+					return sexp.Sel, cexp.Args
+				}
+			}
+		}
+	}
+	return nil, nil
 }
 
 func getFirstTypeInReturn(decl ast.Decl) string {
