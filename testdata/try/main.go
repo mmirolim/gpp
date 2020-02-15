@@ -21,7 +21,8 @@ func main() {
 		}
 		// should not reach here
 		fmt.Printf("fname %+v\n", fname) // output for debug
-		return nil
+		err := errors.New("some custom error")
+		return err
 	})
 	fmt.Println("")
 	fmt.Printf("(result, err) = (%d, %+v)\n", result, err)

@@ -161,10 +161,11 @@ func MacroTryExpand(
 	stmts := []ast.Stmt{errDecl}
 	stmts = append(stmts, procRecur(funcLit.Body.List)...)
 
-	// last element should be return
-	ret, ok := stmts[len(stmts)-1].(*ast.ReturnStmt)
-	if ok {
-		ret.Results[0] = errIdent
+	// last element should be return, set to tryerr if nil
+	if ret, ok := stmts[len(stmts)-1].(*ast.ReturnStmt); ok {
+		if ident, ok := ret.Results[0].(*ast.Ident); ok && ident.Name == "nil" {
+			ret.Results[0] = errIdent
+		}
 	}
 	funcLit.Body.List = stmts
 	callExpr := createCallExpr(funcLit, nil)
