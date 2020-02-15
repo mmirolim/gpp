@@ -42,10 +42,6 @@ var MacroExpanders = map[string]MacroExpander{
 	Seq_μTypeSymbol: MacroNewSeq,
 	Try_μSymbol:     MacroTryExpand,
 	Log_μSymbol:     MacroLogExpand,
-	// TODO change to package path
-	"macro." + Seq_μTypeSymbol: MacroNewSeq,
-	"macro." + Try_μSymbol:     MacroTryExpand,
-	"macro." + Log_μSymbol:     MacroLogExpand,
 }
 
 var MacroDecl = map[string]*ast.FuncDecl{}
@@ -115,32 +111,13 @@ func Pre(cur *astutil.Cursor) bool {
 	if ApplyState.IsOuterMacro {
 		return false
 	}
-	var parentStmt ast.Stmt
-	var callExpr *ast.CallExpr
-	// as standalone expr
-	if estmt, ok := n.(*ast.ExprStmt); ok {
-		if cexp, ok := estmt.X.(*ast.CallExpr); ok {
-			parentStmt = estmt
-			callExpr = cexp
-		}
-	}
-	// in assignment
-	if assign, ok := n.(*ast.AssignStmt); ok {
-		for i := range assign.Rhs {
-			if cexp, ok := assign.Rhs[i].(*ast.CallExpr); ok {
-				parentStmt = assign
-				callExpr = cexp
-			}
-		}
-
-	}
-
+	parentStmt, callExpr := getCallExprAndParent(n)
 	if callExpr == nil {
 		return true
 	}
 	var callArgs [][]ast.Expr
 	var idents []*ast.Ident
-	IdentsFromCallExpr(&idents, &callArgs, callExpr)
+	IdentsFromCallExpr(callExpr, &idents, &callArgs)
 	if len(idents) == 0 {
 		// skip unhandled cases
 		return true
@@ -153,39 +130,12 @@ func Pre(cur *astutil.Cursor) bool {
 		ident = idents[0]
 	}
 
-	if ident.Obj == nil || ident.Obj.Decl == nil {
-		// TODO define func
-		// check in macro decls
-		if strings.HasSuffix(ident.Name, MacroSymbol) {
-			ident.Obj = &ast.Object{
-				Name: ident.Name,
-				Decl: MacroDecl[ident.Name],
-			}
-		} else if ident.Name == "macro" {
-			name := fmt.Sprintf("%s.%s", ident.Name, idents[1].Name)
-			ident.Obj = &ast.Object{
-				Name: name,
-				Decl: MacroDecl[name],
-			}
-		} else {
-			return true
-		}
+	decl := getMacroDeclByName(ident.Name)
+	if decl == nil {
+		return true
 	}
-
-	macroTypeName := ""
-	if decl, ok := ident.Obj.Decl.(*ast.FuncDecl); ok {
-		// TODO construct for not only star expressions or any selector?
-		if decl != nil && decl.Type.Results != nil && decl.Type.Results.List[0] != nil {
-			expr, ok := decl.Type.Results.List[0].Type.(*ast.StarExpr)
-			if ok {
-				//  TODO use recursive solution
-				id := expr.X.(*ast.Ident)
-				if strings.HasSuffix(id.Name, MacroSymbol) {
-					macroTypeName = id.Name
-				}
-			}
-		}
-	}
+	macroTypeName := getFirstTypeInReturn(decl)
+	ident.Obj = &ast.Object{Name: ident.Name, Decl: decl}
 	// get expand func
 	if expand, ok := MacroExpanders[macroTypeName]; ok {
 		expand(cur, parentStmt, idents, callArgs, Pre, Post)
@@ -196,6 +146,52 @@ func Pre(cur *astutil.Cursor) bool {
 	}
 
 	return true
+
+}
+
+func getFirstTypeInReturn(decl ast.Decl) string {
+	if decl == nil {
+		return ""
+	}
+	if fnDecl, ok := decl.(*ast.FuncDecl); ok {
+		// TODO construct for not only star expressions or any selector?
+		if fnDecl.Type.Results != nil && fnDecl.Type.Results.List[0] != nil {
+			expr, ok := fnDecl.Type.Results.List[0].Type.(*ast.StarExpr)
+			if ok {
+				//  TODO use recursive solution
+				id := expr.X.(*ast.Ident)
+				return id.Name
+			}
+		}
+	}
+	return ""
+}
+
+func getCallExprAndParent(n ast.Node) (parentStmt ast.Stmt, callExpr *ast.CallExpr) {
+	switch stmt := n.(type) {
+	case *ast.ExprStmt:
+		// as standalone expr
+		if cexp, ok := stmt.X.(*ast.CallExpr); ok {
+			parentStmt = stmt
+			callExpr = cexp
+		}
+	case *ast.AssignStmt:
+		// in assignment
+		for i := range stmt.Rhs {
+			if cexp, ok := stmt.Rhs[i].(*ast.CallExpr); ok {
+				parentStmt = stmt
+				callExpr = cexp
+			}
+		}
+	}
+	return
+}
+
+func getMacroDeclByName(name string) *ast.FuncDecl {
+	if fdecl, ok := MacroDecl[name]; ok {
+		return fdecl
+	}
+	return nil
 }
 
 // Post ApplyFunc for ast processing
@@ -352,7 +348,7 @@ func createDeclStmt(decTyp token.Token, name string, typ ast.Expr) (*ast.DeclStm
 }
 
 // IdentsFromCallExpr
-func IdentsFromCallExpr(idents *[]*ast.Ident, callArgs *[][]ast.Expr, expr *ast.CallExpr) {
+func IdentsFromCallExpr(expr *ast.CallExpr, idents *[]*ast.Ident, callArgs *[][]ast.Expr) {
 	switch v := expr.Fun.(type) {
 	case *ast.Ident:
 		*idents = append(*idents, v)
@@ -361,7 +357,7 @@ func IdentsFromCallExpr(idents *[]*ast.Ident, callArgs *[][]ast.Expr, expr *ast.
 		case *ast.Ident:
 			*idents = append(*idents, X)
 		case *ast.CallExpr:
-			IdentsFromCallExpr(idents, callArgs, X)
+			IdentsFromCallExpr(X, idents, callArgs)
 		default:
 			log.Fatalf("selector unsupported type %T %# v\n", v, pretty.Formatter(v))
 		}
