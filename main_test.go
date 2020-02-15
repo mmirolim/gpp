@@ -85,7 +85,7 @@ NewSeq res [2] sum even 12 mult even 48
 			err: nil,
 		},
 	}
-	// TODO go get external packages to test gopath before running
+
 	var buf bytes.Buffer
 	for i, tc := range cases {
 		buf.Reset()

@@ -12,6 +12,8 @@ func Try_μ(fn interface{}) error {
 	return nil
 }
 
+const tryErrName = "_tryerr_"
+
 // MacroTryExpand try macro expander
 func MacroTryExpand(
 	cur *astutil.Cursor,
@@ -36,7 +38,7 @@ func MacroTryExpand(
 	pstmt := parentStmt.(*ast.AssignStmt)
 
 	// create new err variable
-	errDecl, errIdent := createDeclStmt(token.VAR, "err", &ast.Ident{Name: "error"})
+	errDecl, errIdent := createDeclStmt(token.VAR, tryErrName, &ast.Ident{Name: "error"})
 	var procRecur func([]ast.Stmt) []ast.Stmt
 	depth := 0
 	// check all errors in all statements recursively

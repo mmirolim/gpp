@@ -41,27 +41,27 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
   
   ```go
 	err := func() error {
-		var err error
-		fname, err := fStrError(false)
-		if err != nil {
-			return fmt.Errorf("fStrError: %w", err) // append callexpr and wrap error
+		var _tryerr_ error
+		fname, _tryerr_ := fStrError(false)
+		if _tryerr_ != nil {
+			return fmt.Errorf("fStrError: %w", _tryerr_) // append callexpr and wrap error
 		}
-		_, result, err = fPtrIntError(false)
-		if err != nil {
-			return fmt.Errorf("fPtrIntError: %w", err)
+		_, result, _tryerr_ = fPtrIntError(false)
+		if _tryerr_ != nil {
+			return fmt.Errorf("fPtrIntError: %w", _tryerr_)
 		}
 		NoErrReturn()
 		if result == 1 {
-			err = fErr(true)
-			if err != nil {
-				return fmt.Errorf("fErr: %w", err)
+			_tryerr_ = fErr(true)
+			if _tryerr_ != nil {
+				return fmt.Errorf("fErr: %w", _tryerr_)
 			}
 		}
-		_, err = fmt.Printf("fname %+v\n", fname)
-		if err != nil {
-			return fmt.Errorf("fmt.Printf: %w", err)
+		_, _tryerr_ = fmt.Printf("fname %+v\n", fname)
+		if _tryerr_ != nil {
+			return fmt.Errorf("fmt.Printf: %w", _tryerr_)
 		}
-		return err
+		return _tryerr_
 	}()
 	
   ```
