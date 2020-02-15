@@ -74,14 +74,16 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 	num := 10
 	macro.Log_μ(num, strr("hello"))
 	macro.Log_μ("some context", lib.LogLibFuncA(20))
+	macro.Log_μ("log anything")
   ```
   
   Expands
   
   ```go
 	num := 10
-	fmt.Printf("/log/main.go:14 num=%#v strr('hello')=%#v\n", num, strr("hello"))
-	fmt.Printf("/log/main.go:15 %v lib.LogLibFuncA(20)=%#v\n", "some context", lib.LogLibFuncA(20))	
+	fmt.Printf("/log/main.go:18 num=%#v strr('hello')=%#v\n", num, strr("hello"))
+	fmt.Printf("/log/main.go:19 %v lib.LogLibFuncA(20)=%#v\n", "some context", lib.LogLibFuncA(20))	
+	__nooplog_("log anything") // no op stub if line is disabled
   ```
 
 
