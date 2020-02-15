@@ -71,17 +71,17 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
   gpp -run -log=main.go:1[0-9] will enable logging only in main.go file on lines from 10-19.
   
   ```go
-	v1, v2  := 10, 20
-	macro.Log_μ("some context", v1)
-	macro.Log_μ(v1, v2)
+	num := 10
+	macro.Log_μ(num, strr("hello"))
+	macro.Log_μ("some context", lib.LogLibFuncA(20))
   ```
   
   Expands
   
   ```go
-	v1, v2 := 10, 20
-	fmt.Printf("/log/main.go:14 %v v1=%#v\n", "some context", v1)
-	fmt.Printf("/log/main.go:15 v1=%#v v2=%#v\n", v1, v2)
+	num := 10
+	fmt.Printf("/log/main.go:14 num=%#v strr('hello')=%#v\n", num, strr("hello"))
+	fmt.Printf("/log/main.go:15 %v lib.LogLibFuncA(20)=%#v\n", "some context", lib.LogLibFuncA(20))	
   ```
 
 
