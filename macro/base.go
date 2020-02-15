@@ -294,49 +294,6 @@ func createAssignStmt(lhs, rhs []ast.Expr, tok token.Token) *ast.AssignStmt {
 	return stmt
 }
 
-// FnNameFromCallExpr returns name of func/method call
-// from ast.CallExpr
-// TODO test with closure()().Method and arr[i].Param.Method calls
-func FnNameFromCallExpr(fn *ast.CallExpr) (string, error) {
-	var err error
-	var fname string
-	var combineName func(*ast.SelectorExpr) (string, error)
-
-	combineName = func(expr *ast.SelectorExpr) (string, error) {
-		switch v := expr.X.(type) {
-		case *ast.Ident:
-			// base case
-			return v.Name + "." + expr.Sel.Name, nil
-		case *ast.SelectorExpr:
-			fname, err := combineName(v)
-			return fname + "." + expr.Sel.Name, err
-		case *ast.CallExpr:
-			fname, err := FnNameFromCallExpr(v)
-			return fname + "." + expr.Sel.Name, err
-		default:
-			out, err := FormatNode(v)
-			fmt.Printf("Err node print err %v out %+v\n", err, out)
-			return "", fmt.Errorf("unexpected value %T", v)
-		}
-	}
-
-	switch v := fn.Fun.(type) {
-	case *ast.Ident:
-		// base case
-		fname = v.Name
-	case *ast.SelectorExpr:
-		fname, err = combineName(v)
-		if err != nil {
-			return "", err
-		}
-	default:
-		fmt.Printf("unexpected AST %# v\n", pretty.Formatter(v)) // output for debug
-		return "", fmt.Errorf("unexpected value %T", v)
-	}
-
-	return fname, nil
-}
-
 // copyBodyStmt only creates assignment statements
 // shallow copy with new assignable statements
 func copyBodyStmt(argNum int, body *ast.BlockStmt, noreturns bool) *ast.BlockStmt {
