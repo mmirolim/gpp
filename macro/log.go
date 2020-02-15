@@ -63,19 +63,12 @@ func MacroLogExpand(
 		switch v := carg.(type) {
 		case *ast.BasicLit:
 			fmtCfg.Value += "%v "
-		case *ast.Ident:
-			fmtCfg.Value += fmt.Sprintf("%s=%%#v ", v.Name)
-		case *ast.CallExpr:
-			callName, err := FnNameFromCallExpr(v)
-			if err == nil {
-				fmtCfg.Value += fmt.Sprintf("%v=%%#v ", callName)
-			} else {
-				fmtCfg.Value += fmt.Sprintf("%T=%%#v ", v)
-			}
 		default:
-			// define type of unknown
-			fmtCfg.Value += fmt.Sprintf("%T=%%#v ", v)
-			continue
+			callName, err := FormatNode(v)
+			if err != nil {
+				fmt.Printf("WARN FormatNode error on type %T\n", v)
+			}
+			fmtCfg.Value += fmt.Sprintf("%v=%%#v ", callName)
 		}
 		args = append(args, carg)
 	}

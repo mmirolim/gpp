@@ -78,9 +78,9 @@ NewSeq res [2] sum even 12 mult even 48
 			output: `
 /main.go:15 result before result=0
 /main.go:17 result after result=10
-/main.go:20 try err err=<nil>
+/main.go:21 try err err=<nil> a=[][2]int{[2]int{1, 2}} a[0]=[2]int{1, 2} sl(10)[0]=10
 /lib/lib.go:8 LogLibFunc val=20
-/main.go:21 log lib func result lib.LogLibFuncA=20
+/main.go:22 log lib func result lib.LogLibFuncA(20)=20
 `,
 			err: nil,
 		},

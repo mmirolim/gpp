@@ -76,7 +76,6 @@ func main() {
 	if *testFlag {
 		cmd = exec.Command("go", "test", "-v", "./...")
 		cmd.Args = append(cmd.Args, args...)
-		fmt.Printf("%+v\n", cmd.Args) // output for debug
 		cmd.Env = envs
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -88,7 +87,6 @@ func main() {
 		// go build
 		cmd = exec.Command("go", "build")
 		cmd.Args = append(cmd.Args, args...)
-		fmt.Printf("%+v\n", cmd.Args) // output for debug
 		cmd.Env = envs
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -111,7 +109,6 @@ func main() {
 	if *runFlag {
 		cmd = exec.Command("./" + base)
 		cmd.Args = append(cmd.Args, args...)
-		fmt.Printf("%+v\n", cmd.Args) // output for debug
 		cmd.Env = envs
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
