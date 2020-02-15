@@ -87,7 +87,7 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
   ```
 
 
- Map/Filter/Reduce operations on any slice type, they expand to loops and block statement on-call site without using unsafe, interface{} or reflection so it is type safe and there is no significant performance loss
+ Map/Filter/Reduce operations on any slice type, they expand to loops and block statement on-call site without using unsafe, interface{} or reflection so it is type safe and there is no significant performance loss. Map arg func(T [, int]) G, Filter arg func(T [, int]) bool and Reduce args T, func(T, G [, int]) T
   
   ```go
 	fseq := []float64{100, 200, 300, 400, 500, 600}
