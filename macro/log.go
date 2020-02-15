@@ -68,7 +68,8 @@ func MacroLogExpand(
 			if err != nil {
 				fmt.Printf("WARN FormatNode error on type %T\n", v)
 			}
-			fmtCfg.Value += fmt.Sprintf("%v=%%#v ", callName)
+			callName = strings.ReplaceAll(callName, "\"", "'")
+			fmtCfg.Value += fmt.Sprintf("%s=%%#v ", callName)
 		}
 		args = append(args, carg)
 	}

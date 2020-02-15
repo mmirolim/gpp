@@ -407,8 +407,11 @@ func IdentsFromCallExpr(idents *[]*ast.Ident, callArgs *[][]ast.Expr, expr *ast.
 			log.Fatalf("selector unsupported type %T %# v\n", v, pretty.Formatter(v))
 		}
 		*idents = append(*idents, v.Sel)
+	case *ast.IndexExpr:
+		idents = nil
+		return // does not support macro from index expr
 	default:
-		// TODO indexes, indirections
+		// TODO indirections
 		fmt.Printf("WARN IdentsFromCallExpr unsuported type %T\n", v) // output for debug
 		return
 	}

@@ -18,10 +18,15 @@ func main() {
 		return nil
 	})
 	a := [][2]int{{1, 2}}
-	macro.Log_μ("try err", err, a, a[0], sl(10)[0])
-	macro.Log_μ("log lib func result", lib.LogLibFuncA(20))
+	macro.Log_μ("err, slice and index", err, a, a[0])
+	macro.Log_μ("func calls", sl(10)[0], strr("hello"))
+	macro.Log_μ("lib calls", lib.LogLibFuncA(20))
 }
 
 func sl(i int) []float64 {
 	return []float64{float64(i)}
+}
+
+func strr(s string) string {
+	return s
 }

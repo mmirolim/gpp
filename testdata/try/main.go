@@ -10,10 +10,12 @@ import (
 )
 
 func main() {
+	slf := []func() error{func() error { return nil }}
 	var result int
 	err := macro.Try_μ(func() error {
 		fname, _ := fStrError(false)
 		_, result, _ = fPtrIntError(false)
+		slf[0]()
 		NoErrReturn()
 		if result == 1 {
 			// should return here

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"strings"
 
 	"golang.org/x/tools/go/ast/astutil"
 )
@@ -142,11 +143,20 @@ func MacroTryExpand(
 			} else {
 				assignStmt.Lhs = []ast.Expr{errIdent}
 			}
-
-			callName, _ := FnNameFromCallExpr(cexp)
 			fmtCfg := &ast.BasicLit{
 				Kind:  token.STRING,
-				Value: fmt.Sprintf("\"%s: %%w\"", callName),
+				Value: "",
+			}
+			callName, err := FormatNode(cexp)
+			if err != nil {
+				fmt.Printf("WARN FormatNode error on type %T\n", cexp)
+			} else {
+				// do not include args
+				idx := strings.LastIndexByte(callName, '(')
+				fmtCfg = &ast.BasicLit{
+					Kind:  token.STRING,
+					Value: fmt.Sprintf("\"%s: %%w\"", callName[:idx]),
+				}
 			}
 			fmtExpr := &ast.SelectorExpr{
 				X:   &ast.Ident{Name: "fmt"},
