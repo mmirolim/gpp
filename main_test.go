@@ -99,7 +99,7 @@ NewSeq res [2] sum even 12 mult even 48
 			log.Fatalf("chdir %+v", err)
 		}
 
-		cmd = exec.Command("go", "run", "main.go")
+		cmd = exec.Command("go", "build", "main.go")
 		cmd.Env = append(os.Environ(), "GOPATH="+goPathTest)
 		cmd.Stdout = &buf
 		cmd.Stderr = &buf
@@ -109,7 +109,17 @@ NewSeq res [2] sum even 12 mult even 48
 			t.Errorf("cmd args %v\n%s", cmd.Args, output)
 			continue
 		}
-
+		buf.Reset()
+		// run binary
+		cmd = exec.Command("./main")
+		cmd.Stdout = &buf
+		cmd.Stderr = &buf
+		err = cmd.Run()
+		output = buf.String()
+		if isUnexpectedErr(t, i, tc.desc, nil, err) {
+			t.Errorf("cmd args %v\n%s", cmd.Args, output)
+			continue
+		}
 		if output != tc.output {
 			t.Errorf("case [%d] %s\nexpected %s, got %s", i, tc.desc, tc.output, output)
 		}
