@@ -3,9 +3,9 @@ package main
 import (
 	"encoding/csv"
 	"fmt"
-	"log"
 	"math"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"time"
@@ -15,9 +15,9 @@ import (
 
 func main() {
 	fmt.Println("Coronavirus 2020 Time Series Data")
-
+	try, seq, log := macro.Try_μ, macro.NewSeq_μ, macro.Log_μ
 	var recordLines [][]string
-	err := macro.Try_μ(func() error {
+	err := try(func() error {
 		resp, _ := http.Get(link)
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("get failed status %d", resp.StatusCode)
@@ -27,12 +27,13 @@ func main() {
 		return nil
 	})
 	if err != nil {
-		log.Fatal(err)
+		log("try error", err)
+		os.Exit(1)
 	}
 
 	// get dates from header
 	var dates []time.Time
-	macro.NewSeq_μ(recordLines[0][4:]).Map(func(d string) time.Time {
+	seq(recordLines[0][4:]).Map(func(d string) time.Time {
 		dateTime, _ := time.Parse(dateFormat, d)
 		return dateTime
 	}).Ret(&dates)
@@ -40,14 +41,13 @@ func main() {
 	// convert lines to records
 	var records []Record
 	recordLines = recordLines[1:]
-	macro.NewSeq_μ(recordLines).Map(NewRecord).Ret(&records)
+	seq(recordLines).Map(NewRecord).Ret(&records)
 
 	totalByCountry := map[string]int{}
 	totalCases := 0
 	longestName := ""
-	recordsSeq := macro.NewSeq_μ(records)
 
-	recordsSeq.Reduce(&totalByCountry, func(acc mapStrInt, r Record) mapStrInt {
+	seq(records).Reduce(&totalByCountry, func(acc mapStrInt, r Record) mapStrInt {
 		// compute total by country
 		acc[r.Country] += int(r.Dates[len(r.Dates)-1].Number)
 		// compute total number of case
@@ -59,23 +59,23 @@ func main() {
 		return acc
 	})
 
-	macro.Log_μ(">> Total Number of Cases", totalCases)
+	log(">> Total Number of Cases", totalCases)
 	type casesByDate struct {
 		date  time.Time
 		cases int
 	}
 	spaces := make([]byte, len(longestName))
-	macro.NewSeq_μ(spaces).Map(func(ch byte, i int) byte {
+	seq(spaces).Map(func(ch byte, i int) byte {
 		spaces[i] = ' '
 		return spaces[i]
 	})
 
 	casesByDates := make([]casesByDate, len(dates))
 	var cbd []string
-	macro.NewSeq_μ(casesByDates).
+	seq(casesByDates).
 		Map(func(v casesByDate, i int) casesByDate {
 			// sum all cases by each day
-			recordsSeq.Reduce(&casesByDates[i].cases, func(acc int, r Record) int {
+			seq(records).Reduce(&casesByDates[i].cases, func(acc int, r Record) int {
 				return acc + int(r.Dates[i].Number)
 			})
 			casesByDates[i].date = dates[i]
@@ -85,7 +85,7 @@ func main() {
 		Map(func(v casesByDate, i int) string {
 			// convert and format case to string
 			bar := make([]byte, int(math.Log2(float64(casesByDates[i].cases))))
-			macro.NewSeq_μ(bar).Map(func(ch byte, i int) byte {
+			seq(bar).Map(func(ch byte, i int) byte {
 				bar[i] = '*'
 				return bar[i]
 			})
@@ -95,15 +95,15 @@ func main() {
 		}).
 		Ret(&cbd)
 
-	macro.Log_μ(">> Log Scale")
+	log(">> Log Scale")
 	macro.PrintSlice_μ(cbd)
 
 	var countries []string
 	macro.MapKeys_μ(&countries, totalByCountry)
 	sort.Strings(countries)
 
-	macro.Log_μ(">> Sorted by country\n")
-	macro.NewSeq_μ(countries).Reduce(&err, func(e error, c string) error {
+	log(">> Sorted by country\n")
+	seq(countries).Reduce(&err, func(e error, c string) error {
 		fmt.Printf("%s%s : %d\n",
 			c, string(spaces[len(c):]), totalByCountry[c])
 		return nil
@@ -117,8 +117,8 @@ func main() {
 		return css[i].Cases > css[j].Cases
 	})
 
-	macro.Log_μ(">> Sorted by number of cases\n")
-	macro.NewSeq_μ(css).Reduce(&err, func(e error, c countryCases) error {
+	log(">> Sorted by number of cases\n")
+	seq(css).Reduce(&err, func(e error, c countryCases) error {
 		fmt.Printf("%s%s : %d\n",
 			c.Country, string(spaces[len(c.Country):]), c.Cases)
 		return nil
@@ -165,7 +165,8 @@ func NewRecord(rec []string) Record {
 		return nil
 	})
 	if err != nil {
-		log.Fatal(err)
+		macro.Log_μ(err)
+		os.Exit(1)
 	}
 	return record
 }

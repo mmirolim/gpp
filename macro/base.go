@@ -129,13 +129,22 @@ func Pre(cur *astutil.Cursor) bool {
 	if idents[0].Name == ApplyState.MacroLibName {
 		idents = idents[1:]
 	}
-	// TODO refactor
-	if !strings.HasSuffix(idents[0].Name, MacroSymbol) {
-		// maybe variable
-		newIdent, newCallArgs := handleVarToNewSeqMacro(idents[0])
-		if newIdent != nil {
-			idents[0] = newIdent
-			callArgs = append([][]ast.Expr{newCallArgs}, callArgs...)
+
+	if !strings.HasSuffix(idents[0].Name, MacroSymbol) && idents[0].Obj != nil {
+		// resolve if var is in local scope
+		if stmt, ok := idents[0].Obj.Decl.(*ast.AssignStmt); ok {
+			newIdent, newCallArgs := resolveVarInLocalScope(idents[0].Name, stmt)
+			if newIdent != nil {
+				// use var pos for new ident
+				newIdent.NamePos = idents[0].Pos()
+				idents[0] = newIdent
+				if strings.HasSuffix(newIdent.Name, MacroSymbol) {
+					ApplyState.RemoveLib = false
+				}
+			}
+			if newCallArgs != nil {
+				callArgs = append([][]ast.Expr{newCallArgs}, callArgs...)
+			}
 		}
 	}
 
@@ -158,26 +167,39 @@ func Pre(cur *astutil.Cursor) bool {
 
 }
 
-func handleVarToNewSeqMacro(ident *ast.Ident) (*ast.Ident, []ast.Expr) {
-	if ident.Obj == nil {
-		return nil, nil
-	}
-	// TODO handle func
-	// TODO multiple assignment
-	if stmt, ok := ident.Obj.Decl.(*ast.AssignStmt); ok {
-		if cexp, ok := stmt.Rhs[0].(*ast.CallExpr); ok {
-			if sexp, ok := cexp.Fun.(*ast.SelectorExpr); ok {
-				if sexp.Sel.Name == NewSeq_μSymbol {
-					if muteIdent, ok := stmt.Lhs[0].(*ast.Ident); ok {
-						muteIdent.Name = "_"
-						stmt.Tok = token.ASSIGN
-					}
-					return sexp.Sel, cexp.Args
-				}
+func resolveVarInLocalScope(identName string, stmt *ast.AssignStmt) (ident *ast.Ident, args []ast.Expr) {
+	id := 0
+	numberOfMuted := 0
+	for i, expr := range stmt.Lhs {
+		if lhsIdent, ok := expr.(*ast.Ident); ok {
+			// original ident name
+			if lhsIdent.Obj.Name == identName {
+				id = i
+			}
+			if lhsIdent.Name == "_" {
+				numberOfMuted++
 			}
 		}
 	}
-	return nil, nil
+	switch expr := stmt.Rhs[id].(type) {
+	case *ast.SelectorExpr:
+		ident = expr.Sel
+	case *ast.Ident:
+		ident = expr
+	default:
+		// unhandled
+	}
+
+	if ident != nil {
+		if muteIdent, ok := stmt.Lhs[id].(*ast.Ident); ok {
+			muteIdent.Name = "_"
+		}
+		// change assign symbol if all muted
+		if numberOfMuted+1 == len(stmt.Lhs) {
+			stmt.Tok = token.ASSIGN
+		}
+	}
+	return
 }
 
 func getFirstTypeInReturn(decl ast.Decl) string {
@@ -528,19 +550,4 @@ func createFuncTypeFromSignature(sig *types.Signature, curPkg *packages.Package)
 	ft.Params = &ast.FieldList{List: paramList}
 	ft.Results = &ast.FieldList{List: resultList}
 	return ft
-}
-
-func resolveIdentInPkg(ident *ast.Ident, pkg *packages.Package) *ast.Object {
-	for _, file := range pkg.Syntax {
-		for _, decl := range file.Decls {
-			funDecl, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			if funDecl.Name.Name == ident.Name {
-				return funDecl.Name.Obj
-			}
-		}
-	}
-	return nil
 }
