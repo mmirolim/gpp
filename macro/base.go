@@ -418,6 +418,8 @@ func IdentsFromCallExpr(expr *ast.CallExpr, idents *[]*ast.Ident, callArgs *[][]
 	case *ast.IndexExpr:
 		idents = nil
 		return // does not support macro from index expr
+	case *ast.FuncLit:
+		// skip
 	default:
 		// TODO indirections
 		fmt.Printf("WARN IdentsFromCallExpr unsuported type %T\n", v) // output for debug

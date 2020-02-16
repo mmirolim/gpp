@@ -46,7 +46,6 @@ func main() {
 	totalByCountry := map[string]int{}
 	totalCases := 0
 	longestName := ""
-
 	seq(records).Reduce(&totalByCountry, func(acc mapStrInt, r Record) mapStrInt {
 		// compute total by country
 		acc[r.Country] += int(r.Dates[len(r.Dates)-1].Number)
@@ -60,10 +59,6 @@ func main() {
 	})
 
 	log(">> Total Number of Cases", totalCases)
-	type casesByDate struct {
-		date  time.Time
-		cases int
-	}
 	spaces := make([]byte, len(longestName))
 	seq(spaces).Map(func(ch byte, i int) byte {
 		spaces[i] = ' '
@@ -146,6 +141,11 @@ type Record struct {
 type Date struct {
 	Date   time.Time
 	Number float64
+}
+
+type casesByDate struct {
+	date  time.Time
+	cases int
 }
 
 func NewRecord(rec []string) Record {
