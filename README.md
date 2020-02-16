@@ -111,7 +111,7 @@ There are currently Log_μ, Try_μ, and Map/Filter/Reduce macros defined. Benefi
 ## Edge cases
 
 - Early prototype
-- Macro functions and types should be used without assignment or any indirection
+- Macro functions should be used directly or assignment and usage should be in same local scope
 - gpp copy all files to temp directory to parse, rewrite and build it, build may fail if dependencies not found and/or may take long time to load. Enabling go mod and vendoring may help to fix some issues.
 - Needs more extensive testing
 
