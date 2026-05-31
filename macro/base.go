@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/kr/pretty"
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
 )
@@ -26,8 +25,10 @@ const (
 	MacroPkgName    = "macro"
 )
 
-// TODO move to context?
-var ApplyState = struct {
+// Context holds state for macro expansion within a single file.
+// It replaces the previous global ApplyState, making the processor
+// safe for concurrent use and easier to test.
+type Context struct {
 	MacroLibName string
 	RemoveLib    bool
 	File         *ast.File
@@ -36,7 +37,16 @@ var ApplyState = struct {
 	SrcDir       string
 	LogRe        *regexp.Regexp
 	IsOuterMacro bool
-}{}
+	MacroDecls   map[string]*ast.FuncDecl
+}
+
+// MacroExpander is the function type for macro expansion handlers.
+type MacroExpander func(ctx *Context, cur *astutil.Cursor,
+	parentStmt ast.Stmt,
+	idents []*ast.Ident,
+	callArgs [][]ast.Expr,
+	pre, post astutil.ApplyFunc,
+) bool
 
 // define custom macro expand functions
 // TODO make settable, prefixed by modulename?
@@ -46,25 +56,15 @@ var MacroExpanders = map[string]MacroExpander{
 	Log_μSymbol:     MacroLogExpand,
 }
 
-var MacroDecl = map[string]*ast.FuncDecl{}
-
-// MacroExpander expander function type
-type MacroExpander func(cur *astutil.Cursor,
-	parentStmt ast.Stmt,
-	idents []*ast.Ident,
-	callArgs [][]ast.Expr,
-	pre, post astutil.ApplyFunc,
-) bool
-
-// PrintSlice_μ --
-func PrintSlice_μ(sl interface{}) {
+// PrintSlice_μ is a template function for the PrintSlice macro.
+func PrintSlice_μ(sl any) {
 	arg1 := []_T{}
 	for i := range arg1 {
 		fmt.Printf("%v\n", arg1[i])
 	}
 }
 
-// AllMacroDecl collects func decl of macros
+// AllMacroDecl collects func decl of macros from an AST file.
 func AllMacroDecl(f *ast.File, allMacroDecl map[string]*ast.FuncDecl) {
 	for _, decl := range f.Decls {
 		fnDecl, ok := decl.(*ast.FuncDecl)
@@ -103,14 +103,28 @@ func AllMacroDecl(f *ast.File, allMacroDecl map[string]*ast.FuncDecl) {
 	}
 }
 
-// Pre ApplyFunc for ast processing
-func Pre(cur *astutil.Cursor) bool {
+// NewPre returns an AST pre-visitor that expands macros using the given context.
+func NewPre(ctx *Context) astutil.ApplyFunc {
+	return func(cur *astutil.Cursor) bool {
+		return pre(ctx, cur)
+	}
+}
+
+// NewPost returns an AST post-visitor for the given context.
+func NewPost(ctx *Context) astutil.ApplyFunc {
+	return func(cur *astutil.Cursor) bool {
+		return true
+	}
+}
+
+// pre is the core AST pre-visitor that identifies and expands macros.
+func pre(ctx *Context, cur *astutil.Cursor) bool {
 	n := cur.Node()
 	if funDecl, ok := n.(*ast.FuncDecl); ok {
-		ApplyState.IsOuterMacro = IsMacroDecl(funDecl)
+		ctx.IsOuterMacro = IsMacroDecl(funDecl)
 	}
 	// do not expand in macro func declarations
-	if ApplyState.IsOuterMacro {
+	if ctx.IsOuterMacro {
 		return false
 	}
 	parentStmt, callExpr := getCallExprAndParent(n)
@@ -126,7 +140,7 @@ func Pre(cur *astutil.Cursor) bool {
 	}
 
 	// skip lib prefix
-	if idents[0].Name == ApplyState.MacroLibName {
+	if idents[0].Name == ctx.MacroLibName {
 		idents = idents[1:]
 	}
 
@@ -139,7 +153,7 @@ func Pre(cur *astutil.Cursor) bool {
 				newIdent.NamePos = idents[0].Pos()
 				idents[0] = newIdent
 				if strings.HasSuffix(newIdent.Name, MacroSymbol) {
-					ApplyState.RemoveLib = false
+					ctx.RemoveLib = false
 				}
 			}
 			if newCallArgs != nil {
@@ -148,23 +162,27 @@ func Pre(cur *astutil.Cursor) bool {
 		}
 	}
 
-	decl := getMacroDeclByName(idents[0].Name)
+	decl := getMacroDeclByName(ctx.MacroDecls, idents[0].Name)
 	if decl == nil {
 		return true
 	}
 	macroTypeName := getFirstTypeInReturn(decl)
 	ident := idents[0]
 	ident.Obj = &ast.Object{Name: ident.Name, Decl: decl}
+
+	// Create closures for recursive expansion that carry this context
+	preFunc := func(c *astutil.Cursor) bool { return pre(ctx, c) }
+	postFunc := func(c *astutil.Cursor) bool { return true }
+
 	// get expand func
 	if expand, ok := MacroExpanders[macroTypeName]; ok {
-		expand(cur, parentStmt, idents, callArgs, Pre, Post)
+		expand(ctx, cur, parentStmt, idents, callArgs, preFunc, postFunc)
 	} else if expand, ok := MacroExpanders[ident.Name]; ok {
-		expand(cur, parentStmt, idents, callArgs, Pre, Post)
+		expand(ctx, cur, parentStmt, idents, callArgs, preFunc, postFunc)
 	} else if strings.HasSuffix(ident.Name, MacroSymbol) {
-		MacroGeneralExpand(cur, parentStmt, idents, callArgs, Pre, Post)
+		MacroGeneralExpand(ctx, cur, parentStmt, idents, callArgs, preFunc, postFunc)
 	}
 	return true
-
 }
 
 func resolveVarInLocalScope(identName string, stmt *ast.AssignStmt) (ident *ast.Ident, args []ast.Expr) {
@@ -240,21 +258,17 @@ func getCallExprAndParent(n ast.Node) (parentStmt ast.Stmt, callExpr *ast.CallEx
 	return
 }
 
-func getMacroDeclByName(name string) *ast.FuncDecl {
-	if fdecl, ok := MacroDecl[name]; ok {
+func getMacroDeclByName(decls map[string]*ast.FuncDecl, name string) *ast.FuncDecl {
+	if fdecl, ok := decls[name]; ok {
 		return fdecl
 	}
 	return nil
 }
 
-// Post ApplyFunc for ast processing
-func Post(cur *astutil.Cursor) bool {
-	return true
-}
-
-// MacroGeneralExpand default expander
+// MacroGeneralExpand is the default expander for generic macros.
 // TODO describe rules
 func MacroGeneralExpand(
+	ctx *Context,
 	cur *astutil.Cursor,
 	parentStmt ast.Stmt,
 	idents []*ast.Ident,
@@ -400,7 +414,7 @@ func createDeclStmt(decTyp token.Token, name string, typ ast.Expr) (*ast.DeclStm
 	return stmt, ident
 }
 
-// IdentsFromCallExpr
+// IdentsFromCallExpr extracts identifiers and call arguments from a call expression.
 func IdentsFromCallExpr(expr *ast.CallExpr, idents *[]*ast.Ident, callArgs *[][]ast.Expr) {
 	switch v := expr.Fun.(type) {
 	case *ast.Ident:
@@ -412,7 +426,7 @@ func IdentsFromCallExpr(expr *ast.CallExpr, idents *[]*ast.Ident, callArgs *[][]
 		case *ast.CallExpr:
 			IdentsFromCallExpr(X, idents, callArgs)
 		default:
-			log.Fatalf("selector unsupported type %T %# v\n", v, pretty.Formatter(v))
+			log.Fatalf("selector unsupported type %T %#+v\n", v, v)
 		}
 		*idents = append(*idents, v.Sel)
 	case *ast.IndexExpr:
@@ -469,11 +483,12 @@ func checkIsMacroIdent(name string, idents []*ast.Ident) bool {
 	if len(idents) == 0 {
 		return false
 	}
-	// check if it's log macro
-	if (idents[0].Name == "macro" && idents[1].Name == name) ||
-		idents[0].Name == name {
+	// check if it's a macro call via lib prefix or direct
+	if len(idents) >= 2 && idents[0].Name == "macro" && idents[1].Name == name {
 		return true
-
+	}
+	if idents[0].Name == name {
+		return true
 	}
 	return false
 }
@@ -483,13 +498,12 @@ func FormatNode(node ast.Node) (string, error) {
 	buf := new(bytes.Buffer)
 	err := format.Node(buf, token.NewFileSet(), node)
 	if err != nil {
-		fmt.Printf("AST on error %+v\n", pretty.Formatter(node)) // output for debug
+		fmt.Printf("AST on error %+v\n", node) // output for debug
 	}
 	return buf.String(), err
 }
 
 // resolveExpr create obj with func declaration from expr signature
-// TODO rename
 func resolveExpr(expr ast.Expr, curPkg *packages.Package) *ast.Object {
 	if sig, ok := curPkg.TypesInfo.TypeOf(expr).(*types.Signature); ok {
 		return &ast.Object{
@@ -499,8 +513,8 @@ func resolveExpr(expr ast.Expr, curPkg *packages.Package) *ast.Object {
 			},
 		}
 	}
-	fmt.Printf("WARN resolveExpr unhandled expr to resolve %# v\n", pretty.Formatter(expr))
-	fmt.Printf("WARN TypeOf(expr) %#v\n", pretty.Formatter(curPkg.TypesInfo.TypeOf(expr)))
+	fmt.Printf("WARN resolveExpr unhandled expr to resolve %#v\n", expr)
+	fmt.Printf("WARN TypeOf(expr) %#v\n", curPkg.TypesInfo.TypeOf(expr))
 	return nil
 }
 

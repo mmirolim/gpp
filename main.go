@@ -6,7 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
-	"io/ioutil"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -22,13 +22,12 @@ import (
 
 var (
 	dst      = flag.String("C", ".", "working directory")
-	runFlag  = flag.Bool("run", false, "run run binary")
+	runFlag  = flag.Bool("run", false, "run the built binary")
 	testFlag = flag.Bool("test", false, "test binary")
 	goArgs   = flag.String("args", "", "args to go")
 	logFlag  = flag.String("log", "", "regex matching filename:line")
-	// temp directory to use
-	gopath = filepath.Join(os.TempDir(), "gpp_temp_build_dir", "go")
-	logRe  *regexp.Regexp
+	diffFlag = flag.Bool("diff", false, "show macro expansion diff without building")
+	logRe    *regexp.Regexp
 )
 
 func main() {
@@ -36,93 +35,291 @@ func main() {
 	if *logFlag != "" {
 		logRe = regexp.MustCompile(*logFlag)
 	}
+
+	workDir, err := filepath.Abs(*dst)
+	if err != nil {
+		log.Fatalf("resolving work directory: %+v", err)
+	}
+
 	curDir, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("getwd error %+v", err)
+		log.Fatalf("getwd error: %+v", err)
 	}
-	moduleName, err := getModuleName(curDir)
+
+	moduleName, err := getModuleName(workDir)
 	if err != nil {
-		log.Fatalf("getModuleName %+v", err)
+		log.Fatalf("getModuleName: %+v", err)
 	}
-	// source code path according to modulename
-	src := filepath.Join(gopath, "src", moduleName)
-	// clean temp directory with source code
-	err = os.RemoveAll(src)
+
+	// Create staging directory with only the files needed for building.
+	// This avoids copying the entire project (no .git, binaries, data files, etc.)
+	// and leaves the original source untouched.
+	stagingDir, err := os.MkdirTemp("", "gpp-build-*")
 	if err != nil {
-		log.Fatalf("remove all error %+v", err)
+		log.Fatalf("creating staging directory: %+v", err)
 	}
-	err = os.MkdirAll(src, 0700)
-	if err != nil {
-		log.Fatalf("mkdir all error %+v", err)
+	cleanup := true
+	defer func() {
+		if cleanup {
+			os.RemoveAll(stagingDir)
+		}
+	}()
+
+	// Copy Go module files and source files to staging
+	if err := copyModuleToStaging(workDir, stagingDir); err != nil {
+		log.Fatalf("copying to staging: %+v", err)
 	}
-	// copy whole directory to tmp dir
-	cmd := exec.Command("cp", "-r", *dst, src)
-	err = cmd.Run()
-	if err != nil {
-		log.Fatalf("cp -r error %+v", err)
+
+	// --diff mode: show original vs expanded code without building
+	if *diffFlag {
+		if err := showDiff(stagingDir, workDir, moduleName); err != nil {
+			log.Fatalf("diff error: %+v", err)
+		}
+		cleanup = false
+		os.RemoveAll(stagingDir)
+		cleanup = false
+		return
 	}
-	// change dir
-	err = os.Chdir(src)
-	if err != nil {
-		log.Fatalf("chdir %+v", err)
+
+	// Parse and expand macros in the staging directory
+	if err := parseDir(stagingDir, moduleName, logRe); err != nil {
+		log.Fatalf("parse dir error: %+v", err)
 	}
-	err = parseDir(src, moduleName, logRe)
-	if err != nil {
-		log.Fatalf("parse dir error %+v", err)
-	}
-	// set gopath for cmd
-	envs := append(os.Environ(), "GOPATH="+gopath)
-	args := strings.Split(*goArgs, " ")
+
+	// Build or test from the staging directory using proper Go module support
+	args := splitArgs(*goArgs)
 	if *testFlag {
-		cmd = exec.Command("go", "test", "-v", "./...")
+		cmd := exec.Command("go", "test", "-v", "./...")
 		cmd.Args = append(cmd.Args, args...)
-		cmd.Env = envs
+		cmd.Dir = stagingDir
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		err = cmd.Run()
-		if err != nil {
-			log.Fatalf("binary exec error %+v", err)
+		if err := cmd.Run(); err != nil {
+			log.Fatalf("go test error: %+v", err)
 		}
 	} else {
-		// go build
-		cmd = exec.Command("go", "build")
+		binaryName := filepath.Base(moduleName)
+		outputPath := filepath.Join(curDir, binaryName)
+		cmd := exec.Command("go", "build", "-o", outputPath)
 		cmd.Args = append(cmd.Args, args...)
-		cmd.Env = envs
+		cmd.Dir = stagingDir
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		err = cmd.Run()
-		if err != nil {
-			log.Fatalf("go build error %+v", err)
+		if err := cmd.Run(); err != nil {
+			log.Fatalf("go build error: %+v", err)
 		}
 	}
-	err = os.Chdir(curDir)
-	if err != nil {
-		log.Fatalf("chdir %+v", err)
-	}
-	// copy binary back
-	base := filepath.Base(src)
-	cmd = exec.Command("cp", filepath.Join(src, base), base)
-	err = cmd.Run()
-	if err != nil {
-		log.Fatalf("cp error %+v", err)
-	}
-	if *runFlag {
-		cmd = exec.Command("./" + base)
+
+	cleanup = false // keep staging on failure path is handled by defer
+
+	if *runFlag && !*testFlag {
+		binaryName := filepath.Base(moduleName)
+		cmd := exec.Command("./" + binaryName)
 		cmd.Args = append(cmd.Args, args...)
-		cmd.Env = envs
+		cmd.Dir = curDir
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		err = cmd.Run()
+		if err := cmd.Run(); err != nil {
+			log.Fatalf("binary exec error: %+v", err)
+		}
+	}
+
+	// Everything succeeded, clean up staging
+	os.RemoveAll(stagingDir)
+	cleanup = false
+}
+
+// showDiff reads original files, expands macros, and prints a unified-style diff.
+func showDiff(stagingDir, origDir, moduleName string) error {
+	// Parse and expand macros in the staging directory
+	if err := parseDir(stagingDir, moduleName, logRe); err != nil {
+		return err
+	}
+
+	// Walk the staging directory and compare with originals
+	foundDiffs := false
+	err := filepath.WalkDir(stagingDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			log.Fatalf("binary exec error %+v", err)
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+
+		rel, err := filepath.Rel(stagingDir, path)
+		if err != nil {
+			return err
+		}
+
+		// Skip files in the macro library itself
+		if strings.Contains(rel, "macro/") {
+			return nil
+		}
+
+		expanded, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		original, err := os.ReadFile(filepath.Join(origDir, rel))
+		if err != nil {
+			// New file (e.g., nooplog stub injection), show it
+			fmt.Fprintf(os.Stderr, "\n=== NEW: %s ===\n%s\n", rel, string(expanded))
+			foundDiffs = true
+			return nil
+		}
+
+		if string(original) != string(expanded) {
+			if !foundDiffs {
+				fmt.Fprintln(os.Stderr, "")
+				foundDiffs = true
+			}
+			fmt.Fprintf(os.Stderr, "=== DIFF: %s ===\n", rel)
+			printDiff(string(original), string(expanded), rel)
+			fmt.Fprintln(os.Stderr, "")
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	if !foundDiffs {
+		fmt.Fprintln(os.Stderr, "No macro expansions found. Code is unchanged after preprocessing.")
+	}
+	return nil
+}
+
+// printDiff prints a simple line-by-line diff between original and expanded.
+func printDiff(original, expanded, filename string) {
+	origLines := strings.Split(original, "\n")
+	expLines := strings.Split(expanded, "\n")
+
+	maxLen := len(origLines)
+	if len(expLines) > maxLen {
+		maxLen = len(expLines)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		var origLine, expLine string
+		if i < len(origLines) {
+			origLine = origLines[i]
+		}
+		if i < len(expLines) {
+			expLine = expLines[i]
+		}
+
+		if origLine != expLine {
+			if origLine != "" && i < len(origLines) {
+				fmt.Fprintf(os.Stderr, "\033[31m- %s:%d: %s\033[0m\n", filename, i+1, origLine)
+			}
+			if expLine != "" && i < len(expLines) {
+				fmt.Fprintf(os.Stderr, "\033[32m+ %s:%d: %s\033[0m\n", filename, i+1, expLine)
+			}
 		}
 	}
 }
 
+// copyModuleToStaging copies only the files needed for building:
+// go.mod, go.sum, *.go files, and symlinks vendor/ if present.
+// This is much faster and cleaner than copying the entire project.
+func copyModuleToStaging(srcDir, stagingDir string) error {
+	return filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+
+		// Skip hidden directories, test output, and vendor (handled separately)
+		if d.IsDir() {
+			name := d.Name()
+			switch name {
+			case ".git", ".hg", ".svn", ".gpp-cache":
+				return filepath.SkipDir
+			case "vendor":
+				// Symlink vendor instead of copying
+				return os.Symlink(path, filepath.Join(stagingDir, rel))
+			}
+			return nil
+		}
+
+		// Only copy files needed for Go module building
+		base := filepath.Base(path)
+		switch {
+		case base == "go.mod":
+			// Copy go.mod with resolved absolute replace directives
+			return copyGoModWithAbsReplaces(path, filepath.Join(stagingDir, rel))
+		case base == "go.sum":
+			return copyFile(path, filepath.Join(stagingDir, rel))
+		case strings.HasSuffix(base, ".go"):
+			return copyFile(path, filepath.Join(stagingDir, rel))
+		case strings.HasSuffix(base, ".s"), strings.HasSuffix(base, ".c"), strings.HasSuffix(base, ".h"):
+			// CGO support files
+			return copyFile(path, filepath.Join(stagingDir, rel))
+		}
+		return nil
+	})
+}
+
+// copyGoModWithAbsReplaces copies go.mod and resolves any relative replace
+// directives to absolute paths so they work from the staging directory.
+func copyGoModWithAbsReplaces(srcMod, dstMod string) error {
+	if err := os.MkdirAll(filepath.Dir(dstMod), 0o755); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(srcMod)
+	if err != nil {
+		return err
+	}
+	// Resolve relative replace paths from the go.mod file's original directory
+	goModDir := filepath.Dir(srcMod)
+	var out strings.Builder
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Check for replace directive with relative path
+		if strings.HasPrefix(trimmed, "replace ") && strings.Contains(trimmed, "=>") {
+			parts := strings.SplitN(trimmed, "=>", 2)
+			if len(parts) == 2 {
+				replacePath := strings.TrimSpace(parts[1])
+				// Check if it's a relative path (not absolute, not a version like @v1.0)
+				if !filepath.IsAbs(replacePath) && !strings.HasPrefix(replacePath, "@") {
+					absPath, err := filepath.Abs(filepath.Join(goModDir, replacePath))
+					if err == nil {
+						line = parts[0] + "=> " + absPath
+					}
+				}
+			}
+		}
+		out.WriteString(line)
+		out.WriteByte('\n')
+	}
+	return os.WriteFile(dstMod, []byte(out.String()), 0o644)
+}
+
+// copyFile copies a single file, creating parent directories as needed.
+func copyFile(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o644)
+}
+
 func parseDir(dir, moduleName string, logRe *regexp.Regexp) error {
-	ctx := context.Background()
+	bgCtx := context.Background()
 	cfg := &packages.Config{
-		Context: ctx,
+		Context: bgCtx,
 		Dir:     dir,
 		Mode: packages.NeedName |
 			packages.NeedFiles |
@@ -144,20 +341,19 @@ func parseDir(dir, moduleName string, logRe *regexp.Regexp) error {
 	for i := range pkgs {
 		if len(pkgs[i].Errors) > 0 {
 			fmt.Fprintln(os.Stderr, "\n=======\033[31m Build Failed \033[39m=======")
-			if ctx.Err() != nil {
+			if bgCtx.Err() != nil {
 				fmt.Fprintln(os.Stderr, "task canceled")
 				fmt.Fprintln(os.Stderr, "\n============================")
-				err = errors.New("task canceled")
-				return err
+				return errors.New("task canceled")
 			}
 			packages.PrintErrors(pkgs)
 			fmt.Fprintln(os.Stderr, "\n============================")
-			err = errors.New("packages.Load error")
-			return err
+			return errors.New("packages.Load error")
 		}
 	}
 	var visitFailed bool
 	var loadMacroLibOnce sync.Once
+	macroDecls := make(map[string]*ast.FuncDecl)
 	if logRe != nil {
 		// insert nooplog stub
 		insertNoOpLogStub(pkgs)
@@ -176,19 +372,22 @@ func parseDir(dir, moduleName string, logRe *regexp.Regexp) error {
 				continue
 			}
 
-			macro.ApplyState.IsOuterMacro = false
-			macro.ApplyState.File = file
-			macro.ApplyState.Fset = pkg.Fset
-			macro.ApplyState.Pkg = pkg
-			macro.ApplyState.SrcDir = dir
-			macro.ApplyState.LogRe = logRe
-			macro.ApplyState.RemoveLib = true
-			macro.ApplyState.MacroLibName = getMacroLibName(file)
+			// Create per-file context instead of using global state
+			macroCtx := &macro.Context{
+				File:         file,
+				Fset:         pkg.Fset,
+				Pkg:          pkg,
+				SrcDir:       dir,
+				LogRe:        logRe,
+				RemoveLib:    true,
+				MacroLibName: getMacroLibName(file),
+				MacroDecls:   macroDecls,
+			}
 
 			if macroPkg, ok := pkg.Imports[macro.MacroPkgPath]; ok {
 				loadMacroLibOnce.Do(func() {
 					for _, file := range macroPkg.Syntax {
-						macro.AllMacroDecl(file, macro.MacroDecl)
+						macro.AllMacroDecl(file, macroDecls)
 					}
 				})
 			} else {
@@ -197,9 +396,9 @@ func parseDir(dir, moduleName string, logRe *regexp.Regexp) error {
 
 			// remove comments
 			file.Comments = nil
-			modifiedAST := astutil.Apply(file, macro.Pre, macro.Post)
+			modifiedAST := astutil.Apply(file, macro.NewPre(macroCtx), macro.NewPost(macroCtx))
 			updatedFile := modifiedAST.(*ast.File)
-			if macro.ApplyState.RemoveLib {
+			if macroCtx.RemoveLib {
 				removeMacroLibImport(updatedFile)
 			}
 			astStr, err := macro.FormatNode(updatedFile)
@@ -210,7 +409,7 @@ func parseDir(dir, moduleName string, logRe *regexp.Regexp) error {
 			}
 			// packages should be vendored otherwise original lib/deps files will be
 			// overwritten
-			err = ioutil.WriteFile(pkg.GoFiles[i], []byte(astStr), 0700)
+			err = os.WriteFile(pkg.GoFiles[i], []byte(astStr), 0o700)
 			if err != nil {
 				fmt.Printf("write error %+v\n", err) // output for debug
 				visitFailed = true
@@ -257,21 +456,11 @@ func insertNoOpLogStub(pkgs []*packages.Package) {
 	}
 }
 
-// getModuleName returns module name
-// in gived workDir
+// getModuleName returns module name from go.mod in workDir.
 func getModuleName(workDir string) (string, error) {
-	data, err := ioutil.ReadFile(filepath.Join(workDir, "go.mod"))
+	data, err := os.ReadFile(filepath.Join(workDir, "go.mod"))
 	if err != nil {
-		// get from GOPATH
-		gopath := os.Getenv("GOPATH")
-		if gopath == "" {
-			return "", errors.New("GOPATH and go.mod not found")
-		}
-		dir, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Rel(filepath.Join(gopath, "src"), dir)
+		return "", fmt.Errorf("go.mod not found in %s: %w", workDir, err)
 	}
 
 	var line []byte
@@ -297,4 +486,15 @@ func getMacroLibName(file *ast.File) string {
 		}
 	}
 	return ""
+}
+
+// splitArgs splits a space-separated argument string, ignoring empty parts.
+func splitArgs(s string) []string {
+	var args []string
+	for _, a := range strings.Split(s, " ") {
+		if a != "" {
+			args = append(args, a)
+		}
+	}
+	return args
 }

@@ -9,111 +9,87 @@ import (
 	"golang.org/x/tools/go/ast/astutil"
 )
 
-func Try_μ(fn any) error {
+// Must_μ panics on error. Template for Must macro.
+// Usage: macro.Must_μ(func() error { ... })
+// Expands to an immediately-invoked func literal with panic-on-error checks.
+func Must_μ(fn any) error {
 	return nil
 }
 
-const tryErrName = "_tryerr_"
+const Must_μSymbol = "Must_μ"
 
-// MacroTryExpand try macro expander
-func MacroTryExpand(
+// MacroMustExpand is the expander for Must_μ.
+// Like Try_μ but panics instead of returning errors.
+func MacroMustExpand(
 	ctx *Context,
 	cur *astutil.Cursor,
 	parentStmt ast.Stmt,
 	idents []*ast.Ident,
 	callArgs [][]ast.Expr,
 	pre, post astutil.ApplyFunc) bool {
-	if !checkIsMacroIdent(Try_μSymbol, idents) {
+	if !checkIsMacroIdent(Must_μSymbol, idents) {
 		return false
 	}
-
 	if len(callArgs[0]) == 0 {
 		return false
 	}
-	// func lit is arg of try
 	funcLit, ok := callArgs[0][0].(*ast.FuncLit)
 	if !ok {
-		fmt.Printf("WARN expected Try macro, got %+v\n", callArgs[0]) // output for debug
+		fmt.Printf("WARN expected Must macro, got %+v\n", callArgs[0])
 		return false
 	}
-	// expected assignstmt
-	pstmt := parentStmt.(*ast.AssignStmt)
 
 	// create new err variable
-	errDecl, errIdent := createDeclStmt(token.VAR, tryErrName, &ast.Ident{Name: "error"})
+	errDecl, errIdent := createDeclStmt(token.VAR, "_musterr_", &ast.Ident{Name: "error"})
+
 	var procRecur func([]ast.Stmt) []ast.Stmt
-	depth := 0
-	// check all errors in all statements recursively
 	procRecur = func(stmts []ast.Stmt) []ast.Stmt {
-		depth++
 		var bodyList []ast.Stmt
-		var cexp *ast.CallExpr
-		var assignStmt *ast.AssignStmt
 	OUTER:
 		for _, stmt := range stmts {
 			bodyList = append(bodyList, stmt)
+			var cexp *ast.CallExpr
+			var assignStmt *ast.AssignStmt
+
 			switch rstmt := stmt.(type) {
 			case *ast.AssignStmt:
-				// error expected to be last ignored return value
 				lastVar, ok := rstmt.Lhs[len(rstmt.Lhs)-1].(*ast.Ident)
-				if !ok {
+				if !ok || lastVar.Name != "_" {
 					continue OUTER
 				}
-				if lastVar.Name != "_" {
-					continue OUTER
-				}
-				// check is callExpr
 				if cexp, ok = rstmt.Rhs[0].(*ast.CallExpr); !ok {
 					continue OUTER
 				}
-
 				obj := resolveExpr(cexp.Fun, ctx.Pkg)
 				funcDecl := obj.Decl.(*ast.FuncDecl)
-				// check if it is error
-				lastReturnType := funcDecl.Type.Results.
-					List[len(funcDecl.Type.Results.List)-1].Type
-				if typIdent, ok := lastReturnType.(*ast.Ident); ok {
-					if typIdent.Name != "error" {
-						continue OUTER
-					}
-				} else {
-					fmt.Printf("WARN Try macro unexpected type %T\n", lastReturnType)
+				lastReturnType := funcDecl.Type.Results.List[len(funcDecl.Type.Results.List)-1].Type
+				if typIdent, ok := lastReturnType.(*ast.Ident); !ok || typIdent.Name != "error" {
 					continue OUTER
-
 				}
 				assignStmt = rstmt
+
 			case *ast.ExprStmt:
 				if cexp, ok = rstmt.X.(*ast.CallExpr); !ok {
 					continue OUTER
 				}
 				obj := resolveExpr(cexp.Fun, ctx.Pkg)
 				funcDecl := obj.Decl.(*ast.FuncDecl)
-				// check if it is error
 				if len(funcDecl.Type.Results.List) == 0 {
-					continue OUTER // does not return anything
-				}
-				lastReturnType := funcDecl.Type.Results.
-					List[len(funcDecl.Type.Results.List)-1].Type
-				if typIdent, ok := lastReturnType.(*ast.Ident); ok {
-					if typIdent.Name != "error" {
-						continue OUTER
-					}
-				} else {
-					fmt.Printf("WARN Try macro unexpected type %T\n", lastReturnType)
 					continue OUTER
-
 				}
-				// balance assignment
+				lastReturnType := funcDecl.Type.Results.List[len(funcDecl.Type.Results.List)-1].Type
+				if typIdent, ok := lastReturnType.(*ast.Ident); !ok || typIdent.Name != "error" {
+					continue OUTER
+				}
 				var lhs []ast.Expr
 				for i := 0; i < len(funcDecl.Type.Results.List); i++ {
 					lhs = append(lhs, &ast.Ident{Name: "_"})
 				}
 				rhs := []ast.Expr{cexp}
 				assignStmt = createAssignStmt(lhs, rhs, token.ASSIGN)
-				// replace current statement
 				bodyList[len(bodyList)-1] = assignStmt
+
 			default:
-				// TODO handle other block statements if/else/for etc
 				switch instmt := stmt.(type) {
 				case *ast.CaseClause:
 					instmt.Body = procRecur(instmt.Body)
@@ -131,58 +107,74 @@ func MacroTryExpand(
 					instmt.Body.List = procRecur(instmt.Body.List)
 				case *ast.TypeSwitchStmt:
 					instmt.Body.List = procRecur(instmt.Body.List)
-				default:
-					// skip
 				}
-				// unhandled statements
 				continue OUTER
-
 			}
-			// replace with err
+
+			// Replace last _ with err variable
 			if len(assignStmt.Lhs) > 0 {
 				assignStmt.Lhs[len(assignStmt.Lhs)-1] = errIdent
 			} else {
 				assignStmt.Lhs = []ast.Expr{errIdent}
 			}
-			fmtCfg := &ast.BasicLit{
-				Kind:  token.STRING,
-				Value: "",
-			}
+
+			// Build call name for error message
 			callName, err := FormatNode(cexp)
-			if err != nil {
-				fmt.Printf("WARN FormatNode error on type %T\n", cexp)
-			} else {
-				// do not include args
+			errFmt := `""`
+			if err == nil {
 				idx := strings.LastIndexByte(callName, '(')
-				fmtCfg = &ast.BasicLit{
-					Kind:  token.STRING,
-					Value: fmt.Sprintf("\"%s: %%w\"", callName[:idx]),
-				}
+				errFmt = fmt.Sprintf(`"must %s: %%w"`, callName[:idx])
 			}
-			fmtExpr := &ast.SelectorExpr{
-				X:   &ast.Ident{Name: "fmt"},
-				Sel: &ast.Ident{Name: "Errorf"},
+
+			// Build: if _musterr_ != nil { panic(fmt.Errorf("must ...: %w", _musterr_)) }
+			panicCall := createCallExpr(
+				&ast.SelectorExpr{
+					X:   &ast.Ident{Name: "fmt"},
+					Sel: &ast.Ident{Name: "Errorf"},
+				},
+				[]ast.Expr{
+					&ast.BasicLit{Kind: token.STRING, Value: errFmt},
+					errIdent,
+				},
+			)
+			panicStmt := &ast.ExprStmt{
+				X: &ast.CallExpr{
+					Fun:  &ast.Ident{Name: "panic"},
+					Args: []ast.Expr{panicCall},
+				},
 			}
-			callExpr := createCallExpr(fmtExpr, []ast.Expr{fmtCfg, errIdent})
-			bodyList = append(bodyList, createIfErrRetStmt(errIdent, callExpr))
+			ifStmt := &ast.IfStmt{
+				Cond: &ast.BinaryExpr{
+					X: errIdent, Op: token.NEQ, Y: &ast.Ident{Name: "nil"},
+				},
+				Body: &ast.BlockStmt{List: []ast.Stmt{panicStmt}},
+			}
+			bodyList = append(bodyList, ifStmt)
 		}
 		return bodyList
 	}
-	// add top level var err decl
+
+	// Add top level var err decl
 	stmts := []ast.Stmt{errDecl}
 	stmts = append(stmts, procRecur(funcLit.Body.List)...)
 
-	// last element should be return, set to tryerr if nil
-	if ret, ok := stmts[len(stmts)-1].(*ast.ReturnStmt); ok {
-		if ident, ok := ret.Results[0].(*ast.Ident); ok && ident.Name == "nil" {
-			ret.Results[0] = errIdent
-		}
-	}
 	funcLit.Body.List = stmts
 	callExpr := createCallExpr(funcLit, nil)
-	pstmt.Rhs = []ast.Expr{callExpr}
-	// expand body macros
-	astutil.Apply(callExpr, pre, post)
 
+	// The parent must be an ExprStmt (standalone call)
+	if exprStmt, ok := cur.Node().(*ast.ExprStmt); ok {
+		exprStmt.X = callExpr
+	} else if assignStmt, ok := cur.Node().(*ast.AssignStmt); ok {
+		// Must_μ used in assignment — shouldn't normally happen but handle gracefully
+		_ = assignStmt
+		cur.Replace(&ast.ExprStmt{X: callExpr})
+	}
+
+	// Expand body macros
+	astutil.Apply(callExpr, pre, post)
 	return true
+}
+
+func init() {
+	MacroExpanders[Must_μSymbol] = MacroMustExpand
 }

@@ -5,7 +5,7 @@ import "fmt"
 // Convenience macros
 
 // MapKeys_μ returns map keys
-func MapKeys_μ(keys, m interface{}) {
+func MapKeys_μ(keys, m any) {
 	slKeys := &[]_T{}
 	dic := map[_T]_G{}
 	for k := range dic {
@@ -14,7 +14,7 @@ func MapKeys_μ(keys, m interface{}) {
 }
 
 // MapVals_μ returns map values
-func MapVals_μ(vals, m interface{}) {
+func MapVals_μ(vals, m any) {
 	slVals := &[]_T{}
 	dic := map[_T]_G{}
 	for _, v := range dic {
@@ -23,8 +23,8 @@ func MapVals_μ(vals, m interface{}) {
 }
 
 // MapToSlice_μ apply f to elements of m to generate sl
-func MapToSlice_μ(sl, m, f interface{}) {
-	slice := &[]interface{}{}
+func MapToSlice_μ(sl, m, f any) {
+	slice := &[]any{}
 	dic := map[_T]_G{}
 	proc := (func(_T, _G) _T)(nil)
 	for k, v := range dic {
@@ -33,13 +33,13 @@ func MapToSlice_μ(sl, m, f interface{}) {
 }
 
 // PrintMap_μ prints map
-func PrintMap_μ(m interface{}) {
+func PrintMap_μ(m any) {
 	arg2 := map[_T]_G{}
 	PrintMapf_μ("%v : %v\n", arg2)
 }
 
 // PrintMapf_μ prints map in f format
-func PrintMapf_μ(f string, m interface{}) {
+func PrintMapf_μ(f string, m any) {
 	arg1 := f
 	arg2 := map[_T]_G{}
 	for k, v := range arg2 {
@@ -48,7 +48,7 @@ func PrintMapf_μ(f string, m interface{}) {
 }
 
 // PrintMapKeys_μ prints provided keys and values
-func PrintMapKeys_μ(keys, m interface{}) {
+func PrintMapKeys_μ(keys, m any) {
 	arg1 := []_T{}
 	arg2 := map[_T]_G{}
 	for i := range arg1 {

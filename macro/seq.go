@@ -17,20 +17,20 @@ type seq_μ []_T
 type _RF func(_T, _T, int) _T
 type _PF func(_T, int) bool
 type _MF func(_T, int) _T
-type _T interface{}
-type _G interface{}
+type _T any
+type _G any
 
 // NewSeq_μ constructs new sequence and scope
 // src must be slice and passed by value
 // does not modify slice
-func NewSeq_μ(src interface{}) *seq_μ {
+func NewSeq_μ(src any) *seq_μ {
 	seq0 := []_T{}
 	return &seq_μ{seq0}
 }
 
 // Ret copy computed values from seq to out
 // out must be pointer to slice
-func (seq *seq_μ) Ret(out interface{}) {
+func (seq *seq_μ) Ret(out any) {
 	output := &[]_T{}
 	res := []_T{}
 	*output = res
@@ -39,7 +39,7 @@ func (seq *seq_μ) Ret(out interface{}) {
 // Filter values by fn predicate
 // must be in form (val, index) func(_T [, int]) bool
 // index is optional
-func (seq *seq_μ) Filter(fn interface{}) *seq_μ {
+func (seq *seq_μ) Filter(fn any) *seq_μ {
 	f := (_PF)(nil)
 	in := []_T{}
 	out := &[]_T{}
@@ -50,7 +50,7 @@ func (seq *seq_μ) Filter(fn interface{}) *seq_μ {
 // Map apply fn func to seq to generate new seq
 // must be in form func(_T [, int]) _T (any type)
 // index is optional
-func (seq *seq_μ) Map(fn interface{}) *seq_μ {
+func (seq *seq_μ) Map(fn any) *seq_μ {
 	f := (_MF)(nil)
 	in := []_T{}
 	out := &([]_T{})
@@ -62,7 +62,7 @@ func (seq *seq_μ) Map(fn interface{}) *seq_μ {
 // accum should be pointer type *_G
 // fn type func(_G, _T [, int]) _G
 // index is optional
-func (seq *seq_μ) Reduce(accum, fn interface{}) *seq_μ {
+func (seq *seq_μ) Reduce(accum, fn any) *seq_μ {
 	out := accum
 	f := (_RF)(nil)
 	in := []_T{}
@@ -71,7 +71,7 @@ func (seq *seq_μ) Reduce(accum, fn interface{}) *seq_μ {
 }
 
 // Filter_μ (in, out) pointers to slices and fn func(_T [, int]) bool
-func Filter_μ(in, out, fn interface{}) {
+func Filter_μ(in, out, fn any) {
 	input := []_T{}
 	res := &([]_T{})
 	pred := (_PF)(nil)
@@ -83,7 +83,7 @@ func Filter_μ(in, out, fn interface{}) {
 }
 
 // Map_μ (in, out) pointers to slices and fn func(_T [, int]) _G
-func Map_μ(in, out, fn interface{}) {
+func Map_μ(in, out, fn any) {
 	input := []_T{}
 	res := &([]_T{})
 	fun := (_MF)(nil)
@@ -93,7 +93,7 @@ func Map_μ(in, out, fn interface{}) {
 }
 
 // Reduce_μ in pointer/value to slice, out pointer *_G and fn func(_G, _T [, int]) _G
-func Reduce_μ(in, out, fn interface{}) {
+func Reduce_μ(in, out, fn any) {
 	input := []_T{}
 	accum := (*_T)(nil)
 	fun := (_RF)(nil)
@@ -104,6 +104,7 @@ func Reduce_μ(in, out, fn interface{}) {
 
 // MacroNewSeq macro expander for sequence M/F/R
 func MacroNewSeq(
+	ctx *Context,
 	cur *astutil.Cursor,
 	parentStmt ast.Stmt,
 	idents []*ast.Ident,
@@ -132,7 +133,7 @@ func MacroNewSeq(
 	// handle newseq call without chaining
 	if len(idents) == 1 && idents[0].Name == "NewSeq_μ" {
 		// used as variable, add import
-		ApplyState.RemoveLib = false
+		ctx.RemoveLib = false
 		return true
 	}
 	for i := 0; i < len(idents); i++ {
@@ -142,7 +143,7 @@ func MacroNewSeq(
 		var funDecl *ast.FuncDecl
 		if ident.Obj == nil {
 			name := fmt.Sprintf("%s.%s", Seq_μTypeSymbol, ident.Name)
-			funDecl = MacroDecl[name]
+			funDecl = ctx.MacroDecls[name]
 			if funDecl == nil {
 				fmt.Printf("WARN Method Decl not found %+v\n", name)
 				continue
@@ -183,7 +184,7 @@ func MacroNewSeq(
 				case *ast.FuncLit:
 					funcType = fn.Type
 				default:
-					obj := resolveExpr(fn, ApplyState.Pkg)
+					obj := resolveExpr(fn, ctx.Pkg)
 					if obj != nil && obj.Decl != nil {
 						decl := obj.Decl.(*ast.FuncDecl)
 						funcType = decl.Type

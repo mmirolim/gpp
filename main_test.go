@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,44 +9,32 @@ import (
 )
 
 func TestMacro(t *testing.T) {
-	// Setup start
-	testDir := filepath.Join(os.TempDir(), "gpp-test-macro")
-	goPathTest := filepath.Join(testDir, "go")
-	moduleName, err := getModuleName(".")
+	// Resolve project root (where go.mod lives)
+	projectRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd error %+v", err)
+	}
+	moduleName, err := getModuleName(projectRoot)
 	if err != nil {
 		t.Fatalf("getModuleName error %+v", err)
 	}
-	src := filepath.Join(goPathTest, "src", moduleName)
-	// clean before running
-	os.RemoveAll(src)
-	err = os.MkdirAll(src, 0700)
+
+	// Create a shared staging copy of the project for all test cases
+	stagingBase, err := os.MkdirTemp("", "gpp-test-*")
 	if err != nil {
-		t.Fatalf("MkdirAll error %+v", err)
+		t.Fatalf("MkdirTemp error %+v", err)
 	}
-	cmd := exec.Command("cp", "-r", ".", src)
-	err = cmd.Run()
-	if err != nil {
-		t.Fatalf("cp error %+v", err)
-	}
-	curDir, err := os.Getwd()
-	if err != nil {
-		log.Fatalf("getwd error %+v", err)
-	}
-	err = os.Chdir(src)
-	if err != nil {
-		log.Fatalf("chdir %+v", err)
-	}
-	// Setup end
 	defer func() {
-		err = os.Chdir(curDir)
-		if err != nil {
-			log.Fatalf("chdir %+v", err)
-		}
 		if !t.Failed() {
-			// let check directory on fail
-			os.RemoveAll(src)
+			os.RemoveAll(stagingBase)
 		}
 	}()
+
+	// Copy the project module files to staging
+	if err := copyModuleToStaging(projectRoot, stagingBase); err != nil {
+		t.Fatalf("copyModuleToStaging error %+v", err)
+	}
+
 	cases := []struct {
 		desc   string
 		srcDir string
@@ -56,7 +43,7 @@ func TestMacro(t *testing.T) {
 	}{
 		{
 			desc:   "Test NewSeq M/F/R fluent api",
-			srcDir: filepath.Join(src, "testdata", "newseq"),
+			srcDir: filepath.Join(stagingBase, "testdata", "newseq"),
 			output: `
 NewSeq Map/Filter [{strLen:3} {strLen:4}]
 NewSeq res [2] sum even 12 mult even 48
@@ -65,7 +52,7 @@ NewSeq res [2] sum even 12 mult even 48
 		},
 		{
 			desc:   "Test try_μ",
-			srcDir: filepath.Join(src, "testdata", "try"),
+			srcDir: filepath.Join(stagingBase, "testdata", "try"),
 			output: `
 (result, err) = (1, fErr: fErr error)
 (result, err) = (1, <nil>)
@@ -74,7 +61,7 @@ NewSeq res [2] sum even 12 mult even 48
 		},
 		{
 			desc:   "Test log_μ",
-			srcDir: filepath.Join(src, "testdata", "log"),
+			srcDir: filepath.Join(stagingBase, "testdata", "log"),
 			output: `
 /main.go:16 result before result=0
 /main.go:18 result after result=10
@@ -85,22 +72,30 @@ NewSeq res [2] sum even 12 mult even 48
 `,
 			err: nil,
 		},
+		{
+			desc:   "Test guard_μ and must_μ",
+			srcDir: filepath.Join(stagingBase, "testdata", "guard"),
+			output: `
+must ok ok
+guard ok ok
+`,
+			err: nil,
+		},
 	}
 
 	var buf bytes.Buffer
 	for i, tc := range cases {
 		buf.Reset()
-		err = parseDir(tc.srcDir, moduleName, nil)
+
+		// Parse and expand macros in the testdata subdirectory
+		err := parseDir(tc.srcDir, moduleName, nil)
 		if isUnexpectedErr(t, i, tc.desc, tc.err, err) {
 			continue
 		}
-		err = os.Chdir(tc.srcDir)
-		if err != nil {
-			log.Fatalf("chdir %+v", err)
-		}
 
-		cmd = exec.Command("go", "build", "main.go")
-		cmd.Env = append(os.Environ(), "GOPATH="+goPathTest)
+		// Build the preprocessed code
+		cmd := exec.Command("go", "build", "-o", filepath.Join(tc.srcDir, "main"), "main.go")
+		cmd.Dir = tc.srcDir
 		cmd.Stdout = &buf
 		cmd.Stderr = &buf
 		err = cmd.Run()
@@ -109,9 +104,10 @@ NewSeq res [2] sum even 12 mult even 48
 			t.Errorf("cmd args %v\n%s", cmd.Args, output)
 			continue
 		}
+
+		// Run the built binary
 		buf.Reset()
-		// run binary
-		cmd = exec.Command("./main")
+		cmd = exec.Command(filepath.Join(tc.srcDir, "main"))
 		cmd.Stdout = &buf
 		cmd.Stderr = &buf
 		err = cmd.Run()

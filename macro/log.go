@@ -9,7 +9,7 @@ import (
 	"golang.org/x/tools/go/ast/astutil"
 )
 
-func Log_μ(args ...interface{}) {
+func Log_μ(args ...any) {
 }
 
 // LogFuncStubName used as stub to mute unmatched log lines
@@ -17,6 +17,7 @@ const LogFuncStubName = "__nooplog_"
 
 // MacroLogExpand transformer for Log_μ
 func MacroLogExpand(
+	ctx *Context,
 	cur *astutil.Cursor,
 	parentStmt ast.Stmt,
 	idents []*ast.Ident,
@@ -29,13 +30,13 @@ func MacroLogExpand(
 		return false
 	}
 	pos := idents[0].Pos()
-	fileInfo := ApplyState.Fset.File(pos)
+	fileInfo := ctx.Fset.File(pos)
 	fileAndPos := fmt.Sprintf("%s:%d ",
-		strings.TrimPrefix(fileInfo.Name(), ApplyState.SrcDir),
+		strings.TrimPrefix(fileInfo.Name(), ctx.SrcDir),
 		fileInfo.Line(idents[0].Pos()))
 
 	// if enabled check match
-	if ApplyState.LogRe != nil && !ApplyState.LogRe.MatchString(fileAndPos) {
+	if ctx.LogRe != nil && !ctx.LogRe.MatchString(fileAndPos) {
 		// remove
 		if stmt, ok := cur.Node().(*ast.ExprStmt); ok {
 			if callExpr, ok := stmt.X.(*ast.CallExpr); ok {
@@ -79,7 +80,7 @@ func MacroLogExpand(
 	fmtCfg.Value = fmt.Sprintf("\"%s\\n\"", fmtCfg.Value)
 	callExpr := createCallExpr(fmtExpr, args)
 	cur.InsertAfter(&ast.ExprStmt{X: callExpr})
-	astutil.AddImport(ApplyState.Fset, ApplyState.File, "fmt")
+	astutil.AddImport(ctx.Fset, ctx.File, "fmt")
 
 	// expand body macros
 	astutil.Apply(callExpr, pre, post)
