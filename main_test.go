@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -36,10 +37,11 @@ func TestMacro(t *testing.T) {
 	}
 
 	cases := []struct {
-		desc   string
-		srcDir string
-		output string
-		err    error
+		desc       string
+		srcDir     string
+		output     string
+		err        error
+		looseMatch bool // if true, check output contains expected string instead of exact match
 	}{
 		{
 			desc:   "Test NewSeq M/F/R fluent api",
@@ -81,6 +83,16 @@ guard ok ok
 `,
 			err: nil,
 		},
+		{
+			desc:   "Test defer_μ",
+			srcDir: filepath.Join(stagingBase, "testdata", "defer"),
+			output: `
+noErrDefer ok
+errDefer ok
+`,
+			err:        nil,
+			looseMatch: true, // error case also logs with dynamic timestamp
+		},
 	}
 
 	var buf bytes.Buffer
@@ -116,7 +128,11 @@ guard ok ok
 			t.Errorf("cmd args %v\n%s", cmd.Args, output)
 			continue
 		}
-		if output != tc.output {
+		if tc.looseMatch {
+			if !strings.Contains(output, tc.output) {
+				t.Errorf("case [%d] %s\nexpected output to contain %q\n got %q", i, tc.desc, tc.output, output)
+			}
+		} else if output != tc.output {
 			t.Errorf("case [%d] %s\nexpected %s, got %s", i, tc.desc, tc.output, output)
 		}
 	}

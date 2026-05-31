@@ -394,6 +394,10 @@ func parseDir(dir, moduleName string, logRe *regexp.Regexp) error {
 				return true // no macro in package
 			}
 
+			// Check for //gpp:ignore file-level directive before processing
+			if hasIgnoreDirective(file) {
+				continue
+			}
 			// remove comments
 			file.Comments = nil
 			modifiedAST := astutil.Apply(file, macro.NewPre(macroCtx), macro.NewPost(macroCtx))
@@ -420,6 +424,19 @@ func parseDir(dir, moduleName string, logRe *regexp.Regexp) error {
 	}, nil)
 
 	return nil
+}
+
+// hasIgnoreDirective checks if a file contains a //gpp:ignore comment,
+// which signals that macro expansion should be skipped for this file.
+func hasIgnoreDirective(file *ast.File) bool {
+	for _, cg := range file.Comments {
+		for _, c := range cg.List {
+			if strings.Contains(c.Text, "gpp:ignore") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func removeMacroLibImport(file *ast.File) {

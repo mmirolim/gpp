@@ -6,7 +6,7 @@ Gpp is a Go macro preprocessor and library. Expansion of all identified macros i
 
 Go 1.26 has excellent generics, but they still cannot have [method-level type parameters](https://github.com/golang/go/issues/77273) (proposal accepted, no target release). This means fluent/chained APIs like `.Map().Filter().Reduce()` are **impossible** in pure generics. Gpp macros expand these at compile time into efficient inline loops, producing zero-overhead, type-safe code — no reflection, no `unsafe`, no code generation bloat.
 
-There are currently Try_μ, Guard_μ, Must_μ, Log_μ, and Map/Filter/Reduce macros defined.
+There are currently Try_μ, Guard_μ, Must_μ, Defer_μ, Log_μ, and Map/Filter/Reduce macros defined.
 
 ## Examples
 
@@ -60,7 +60,29 @@ There are currently Try_μ, Guard_μ, Must_μ, Log_μ, and Map/Filter/Reduce mac
 	})
  ```
 
+### Defer_μ — Error-aware cleanup
+
+ Handles cleanup errors that `defer f.Close()` silently ignores:
+
+ ```go
+	f, _ := os.Open("file.txt")
+	macro.Defer_μ(f.Close) // logs error if Close() fails
+ ```
+
+ Expands to:
+
+ ```go
+	defer func() {
+		err := f.Close()
+		if err != nil {
+			log.Printf("gpp defer f.Close: %v", err)
+		}
+	}()
+ ```
+
 ### Log_μ — Compile-time logging
+
+
 
  Logs can be selectively enabled/disabled on preprocessing stage — disabled logs become zero-cost no-ops.
 
