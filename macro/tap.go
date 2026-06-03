@@ -1,6 +1,7 @@
 package macro
 
 import (
+	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/ast/astutil"
@@ -15,13 +16,19 @@ import (
 //	    Tap_μ(func(v ItemType) { log.Println("debug:", v) }).
 //	    Filter(predicate).
 //	    Ret(&result)
+//
+// Tap_μ is handled directly by MacroNewSeq as a pipeline stage — it generates
+// a for-range loop that calls the tap function for each element but does not
+// create a new pipeline variable. The next stage reuses the same sequence.
+//
+// Supports both func(v T) and func(v T, i int) signatures.
 func Tap_μ(fn any) any { return nil }
 
 const Tap_μSymbol = "Tap_μ"
 
-// MacroTapExpand is the expander for Tap_μ.
-// It inserts the tap function call as a side-effect statement in the pipeline
-// and passes the sequence value through unchanged.
+// MacroTapExpand is the fallback expander for standalone Tap_μ usage.
+// In practice, Tap_μ is always used inside a NewSeq_μ chain and is
+// handled by MacroNewSeq's pipeline processing.
 func MacroTapExpand(
 	ctx *Context,
 	cur *astutil.Cursor,
@@ -29,20 +36,12 @@ func MacroTapExpand(
 	idents []*ast.Ident,
 	callArgs [][]ast.Expr,
 	pre, post astutil.ApplyFunc) bool {
-	if !checkIsMacroIdent(Tap_μSymbol, idents) {
-		return false
+	// Tap_μ in a NewSeq chain is handled by MacroNewSeq.
+	// If we reach here, it means Tap_μ was used outside a chain (unsupported).
+	if checkIsMacroIdent(Tap_μSymbol, idents) {
+		fmt.Printf("WARN Tap_μ must be used inside a NewSeq_μ chain\n")
 	}
-	if len(callArgs) == 0 || len(callArgs[0]) == 0 {
-		return false
-	}
-
-	// Tap_μ(fn) is used inside a chain like:
-	//   seq.Tap_μ(func(v T) { ... })
-	// The macro expander for NewSeq handles the pipeline wiring.
-	// Tap just needs to be recognized as a valid pipeline stage.
-	// The general expander will handle the body template.
-
-	return false // let MacroGeneralExpand handle it via the template body
+	return false
 }
 
 func init() {

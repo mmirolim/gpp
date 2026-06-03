@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
+	"go/token"
 	"io/fs"
 	"log"
 	"os"
@@ -21,13 +22,14 @@ import (
 )
 
 var (
-	dst      = flag.String("C", ".", "working directory")
-	runFlag  = flag.Bool("run", false, "run the built binary")
-	testFlag = flag.Bool("test", false, "test binary")
-	goArgs   = flag.String("args", "", "args to go")
-	logFlag  = flag.String("log", "", "regex matching filename:line")
-	diffFlag = flag.Bool("diff", false, "show macro expansion diff without building")
-	logRe    *regexp.Regexp
+	dst       = flag.String("C", ".", "working directory")
+	runFlag   = flag.Bool("run", false, "run the built binary")
+	testFlag  = flag.Bool("test", false, "test binary")
+	goArgs    = flag.String("args", "", "args to go")
+	logFlag   = flag.String("log", "", "regex matching filename:line")
+	diffFlag  = flag.Bool("diff", false, "show macro expansion diff without building")
+	checkFlag = flag.Bool("check", false, "validate macro usage without building")
+	logRe     *regexp.Regexp
 )
 
 func main() {
@@ -68,6 +70,17 @@ func main() {
 	// Copy Go module files and source files to staging
 	if err := copyModuleToStaging(workDir, stagingDir); err != nil {
 		log.Fatalf("copying to staging: %+v", err)
+	}
+
+	// --check mode: validate macro usage without building
+	if *checkFlag {
+		if err := checkMacros(stagingDir, moduleName); err != nil {
+			log.Fatalf("check: %+v", err)
+		}
+		cleanup = false
+		os.RemoveAll(stagingDir)
+		cleanup = false
+		return
 	}
 
 	// --diff mode: show original vs expanded code without building
@@ -372,57 +385,252 @@ func parseDir(dir, moduleName string, logRe *regexp.Regexp) error {
 				continue
 			}
 
-			// Create per-file context instead of using global state
-			macroCtx := &macro.Context{
-				File:         file,
-				Fset:         pkg.Fset,
-				Pkg:          pkg,
-				SrcDir:       dir,
-				LogRe:        logRe,
-				RemoveLib:    true,
-				MacroLibName: getMacroLibName(file),
-				MacroDecls:   macroDecls,
+			// Check for //gpp:ignore file-level directive before processing
+			if hasIgnoreDirective(file) {
+				continue
 			}
 
+			// Process //gpp:derive directives before stripping comments.
+			// This works independently of macro imports.
+			deriveMethods := macro.ProcessDeriveDirectives(file)
+
+			// Check if macro package is imported
+			hasMacros := false
 			if macroPkg, ok := pkg.Imports[macro.MacroPkgPath]; ok {
+				hasMacros = true
 				loadMacroLibOnce.Do(func() {
 					for _, file := range macroPkg.Syntax {
 						macro.AllMacroDecl(file, macroDecls)
 					}
 				})
-			} else {
-				return true // no macro in package
 			}
 
-			// Check for //gpp:ignore file-level directive before processing
-			if hasIgnoreDirective(file) {
+			// Skip files with no directives and no macros
+			if !hasMacros && len(deriveMethods) == 0 {
 				continue
 			}
-			// remove comments
-			file.Comments = nil
-			modifiedAST := astutil.Apply(file, macro.NewPre(macroCtx), macro.NewPost(macroCtx))
-			updatedFile := modifiedAST.(*ast.File)
-			if macroCtx.RemoveLib {
-				removeMacroLibImport(updatedFile)
+
+			// Add generated derive methods to the file
+			if len(deriveMethods) > 0 {
+				for _, m := range deriveMethods {
+					file.Decls = append(file.Decls, m)
+				}
+				astutil.AddImport(pkg.Fset, file, "fmt")
 			}
-			astStr, err := macro.FormatNode(updatedFile)
-			if err != nil {
-				fmt.Printf("format node err %+v\n", err) // output for debug
-				visitFailed = true
-				break
-			}
-			// packages should be vendored otherwise original lib/deps files will be
-			// overwritten
-			err = os.WriteFile(pkg.GoFiles[i], []byte(astStr), 0o700)
-			if err != nil {
-				fmt.Printf("write error %+v\n", err) // output for debug
-				visitFailed = true
-				break
+
+			// Run macro expansion if macro package is imported
+			if hasMacros {
+				macroCtx := &macro.Context{
+					File:         file,
+					Fset:         pkg.Fset,
+					Pkg:          pkg,
+					SrcDir:       dir,
+					LogRe:        logRe,
+					RemoveLib:    true,
+					MacroLibName: getMacroLibName(file),
+					MacroDecls:   macroDecls,
+				}
+
+				file.Comments = nil
+				modifiedAST := astutil.Apply(file, macro.NewPre(macroCtx), macro.NewPost(macroCtx))
+				updatedFile := modifiedAST.(*ast.File)
+				if macroCtx.RemoveLib {
+					removeMacroLibImport(updatedFile)
+				}
+				astStr, err := macro.FormatNode(updatedFile)
+				if err != nil {
+					fmt.Printf("format node err %+v\n", err) // output for debug
+					visitFailed = true
+					break
+				}
+				err = os.WriteFile(pkg.GoFiles[i], []byte(astStr), 0o700)
+			} else {
+				// Derive-only: format and write without macro expansion
+				file.Comments = nil
+				astStr, err := macro.FormatNode(file)
+				if err != nil {
+					fmt.Printf("format node err %+v\n", err) // output for debug
+					visitFailed = true
+					break
+				}
+				err = os.WriteFile(pkg.GoFiles[i], []byte(astStr), 0o700)
+				if err != nil {
+					fmt.Printf("write error %+v\n", err) // output for debug
+					visitFailed = true
+					break
+				}
 			}
 		}
 		return true
 	}, nil)
 
+	return nil
+}
+
+// Diagnostic represents a macro usage issue found during checking.
+type Diagnostic struct {
+	Pos      string // file:line:col
+	Severity string // "error" or "warning"
+	Message  string
+}
+
+// checkMacros validates macro usage in the given directory without building.
+// It reports unknown macros, wrong argument counts, and missing imports.
+func checkMacros(dir, moduleName string) error {
+	bgCtx := context.Background()
+	cfg := &packages.Config{
+		Context: bgCtx,
+		Dir:     dir,
+		Mode: packages.NeedName |
+			packages.NeedFiles |
+			packages.NeedSyntax |
+			packages.NeedTypes |
+			packages.NeedTypesInfo |
+			packages.NeedImports |
+			packages.NeedDeps,
+		Tests: true,
+	}
+
+	pkgs, err := packages.Load(cfg, "./...")
+	if err != nil {
+		return fmt.Errorf("loading packages: %w", err)
+	}
+
+	for i := range pkgs {
+		if len(pkgs[i].Errors) > 0 {
+			packages.PrintErrors(pkgs)
+			return fmt.Errorf("packages.Load error")
+		}
+	}
+
+	var diagnostics []Diagnostic
+	var loadMacroLibOnce sync.Once
+	macroDecls := make(map[string]*ast.FuncDecl)
+
+	packages.Visit(pkgs, func(pkg *packages.Package) bool {
+		for i, file := range pkg.Syntax {
+			if i >= len(pkg.GoFiles) || !strings.HasPrefix(pkg.GoFiles[i], dir) {
+				continue
+			}
+
+			// Load macro declarations
+			if macroPkg, ok := pkg.Imports[macro.MacroPkgPath]; ok {
+				loadMacroLibOnce.Do(func() {
+					for _, f := range macroPkg.Syntax {
+						macro.AllMacroDecl(f, macroDecls)
+					}
+				})
+			}
+
+			// Walk AST looking for _μ-suffixed calls
+			ast.Inspect(file, func(n ast.Node) bool {
+				callExpr, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+
+				// Extract function name
+				var fnName string
+				var isMacroLib bool
+				switch fun := callExpr.Fun.(type) {
+				case *ast.SelectorExpr:
+					if ident, ok := fun.X.(*ast.Ident); ok {
+						if ident.Name == "macro" || ident.Name == getMacroLibName(file) {
+							isMacroLib = true
+						}
+						fnName = fun.Sel.Name
+					}
+				case *ast.Ident:
+					fnName = fun.Name
+				}
+
+				if fnName == "" || !strings.HasSuffix(fnName, "_μ") {
+					return true
+				}
+
+				pos := pkg.Fset.Position(callExpr.Pos())
+
+				// Check if it's a known macro
+				if isMacroLib || macroDecls[fnName] != nil {
+					decl := macroDecls[fnName]
+					if decl == nil {
+						// Might be a chained method (handled by pipeline)
+						return true
+					}
+
+					// Check argument count for standalone macro calls
+					if decl.Type.Params != nil {
+						expectedParams := 0
+						isVariadic := false
+						for _, field := range decl.Type.Params.List {
+							if _, ok := field.Type.(*ast.Ellipsis); ok {
+								isVariadic = true
+							}
+							if len(field.Names) > 0 {
+								expectedParams += len(field.Names)
+							} else {
+								expectedParams++
+							}
+						}
+						actualArgs := len(callExpr.Args)
+						if !isVariadic && actualArgs != expectedParams && expectedParams > 0 {
+							// Allow more args for variadic
+							diagnostics = append(diagnostics, Diagnostic{
+								Pos:      pos.String(),
+								Severity: "warning",
+								Message:  fmt.Sprintf("%s: expected %d arg(s), got %d", fnName, expectedParams, actualArgs),
+							})
+						}
+					}
+				} else {
+					// Unknown macro
+					diagnostics = append(diagnostics, Diagnostic{
+						Pos:      pos.String(),
+						Severity: "error",
+						Message:  fmt.Sprintf("unknown macro: %s", fnName),
+					})
+				}
+
+				return true
+			})
+
+			// Check for derive directives
+			for _, decl := range file.Decls {
+				genDecl, ok := decl.(*ast.GenDecl)
+				if !ok || genDecl.Tok != token.TYPE || genDecl.Doc == nil {
+					continue
+				}
+				for _, comment := range genDecl.Doc.List {
+					targets := macro.ParseDeriveDirective(comment.Text)
+					for _, t := range targets {
+						switch t {
+						case "String":
+							// OK, supported
+						default:
+							pos := pkg.Fset.Position(genDecl.Pos())
+							diagnostics = append(diagnostics, Diagnostic{
+								Pos:      pos.String(),
+								Severity: "warning",
+								Message:  fmt.Sprintf("unsupported derive target: %q (supported: String)", t),
+							})
+						}
+					}
+				}
+			}
+		}
+		return true
+	}, nil)
+
+	// Output diagnostics
+	for _, d := range diagnostics {
+		fmt.Fprintf(os.Stderr, "%s: %s: %s\n", d.Pos, d.Severity, d.Message)
+	}
+
+	if len(diagnostics) > 0 {
+		return fmt.Errorf("%d issue(s) found", len(diagnostics))
+	}
+
+	fmt.Fprintln(os.Stderr, "OK: no macro issues found.")
 	return nil
 }
 

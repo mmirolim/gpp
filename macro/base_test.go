@@ -3,6 +3,7 @@ package macro
 import (
 	"go/ast"
 	"go/token"
+	"strings"
 	"testing"
 )
 
@@ -334,7 +335,7 @@ func TestContext(t *testing.T) {
 
 func TestMacroSymbols(t *testing.T) {
 	// Verify all macro symbols are registered in MacroExpanders
-	expectedSymbols := []string{Try_μSymbol, Log_μSymbol, Guard_μSymbol, Must_μSymbol, Seq_μTypeSymbol}
+	expectedSymbols := []string{Try_μSymbol, Log_μSymbol, Guard_μSymbol, Must_μSymbol, Defer_μSymbol, Tap_μSymbol, Seq_μTypeSymbol}
 	for _, sym := range expectedSymbols {
 		if _, ok := MacroExpanders[sym]; !ok {
 			t.Errorf("macro symbol %q not registered in MacroExpanders", sym)
@@ -392,5 +393,142 @@ func TestGetFirstTypeInReturn(t *testing.T) {
 	result3 := getFirstTypeInReturn(nil)
 	if result3 != "" {
 		t.Errorf("expected empty string for nil, got %q", result3)
+	}
+}
+
+func TestParseDeriveDirective(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "single derive",
+			input: "//gpp:derive String",
+			want:  []string{"String"},
+		},
+		{
+			name:  "multiple derives",
+			input: "//gpp:derive String,Validate",
+			want:  []string{"String", "Validate"},
+		},
+		{
+			name:  "no derive",
+			input: "// some other comment",
+			want:  nil,
+		},
+		{
+			name:  "derive with spaces",
+			input: "//gpp:derive  String , Validate ",
+			want:  []string{"String", "Validate"},
+		},
+		{
+			name:  "empty derive",
+			input: "//gpp:derive",
+			want:  nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseDeriveDirective(tt.input)
+			if len(got) != len(tt.want) {
+				t.Errorf("ParseDeriveDirective(%q) = %v, want %v", tt.input, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("ParseDeriveDirective(%q)[%d] = %q, want %q", tt.input, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestFindConstNamesForType(t *testing.T) {
+	file := &ast.File{
+		Decls: []ast.Decl{
+			&ast.GenDecl{
+				Tok: token.CONST,
+				Specs: []ast.Spec{
+					&ast.ValueSpec{
+						Names: []*ast.Ident{
+							{Name: "Red"},
+							{Name: "Green"},
+							{Name: "Blue"},
+						},
+						Type: &ast.Ident{Name: "Color"},
+					},
+				},
+			},
+			&ast.GenDecl{
+				Tok: token.CONST,
+				Specs: []ast.Spec{
+					&ast.ValueSpec{
+						Names: []*ast.Ident{{Name: "Active"}},
+						Type:  &ast.Ident{Name: "Status"},
+					},
+				},
+			},
+		},
+	}
+
+	names := FindConstNamesForType(file, "Color")
+	if len(names) != 3 {
+		t.Fatalf("expected 3 names, got %d: %v", len(names), names)
+	}
+	expected := []string{"Red", "Green", "Blue"}
+	for i, n := range names {
+		if n != expected[i] {
+			t.Errorf("names[%d] = %q, want %q", i, n, expected[i])
+		}
+	}
+
+	names2 := FindConstNamesForType(file, "Status")
+	if len(names2) != 1 || names2[0] != "Active" {
+		t.Errorf("expected [Active], got %v", names2)
+	}
+
+	names3 := FindConstNamesForType(file, "Unknown")
+	if len(names3) != 0 {
+		t.Errorf("expected empty for unknown type, got %v", names3)
+	}
+}
+
+func TestGenerateStringMethod(t *testing.T) {
+	method := GenerateStringMethod("Color", []string{"Red", "Green", "Blue"})
+	if method == nil {
+		t.Fatal("expected non-nil FuncDecl")
+	}
+	if method.Name.Name != "String" {
+		t.Errorf("expected method name 'String', got %q", method.Name.Name)
+	}
+	if method.Recv == nil || len(method.Recv.List) != 1 {
+		t.Error("expected one receiver")
+	}
+	if len(method.Recv.List[0].Names) != 1 || method.Recv.List[0].Names[0].Name != "c" {
+		t.Errorf("expected receiver name 'c', got %v", method.Recv.List[0].Names)
+	}
+
+	// Verify it formats correctly
+	str, err := FormatNode(method)
+	if err != nil {
+		t.Fatalf("FormatNode error: %v", err)
+	}
+	if !strings.Contains(str, "case Red:") {
+		t.Errorf("expected switch to contain 'case Red:', got %q", str)
+	}
+	if !strings.Contains(str, "Color(%d)") {
+		t.Errorf("expected default case to contain 'Color(%%d)', got %q", str)
+	}
+}
+
+func TestGenerateStringMethodShortName(t *testing.T) {
+	// Test with a single-char type name
+	method := GenerateStringMethod("T", []string{"A", "B"})
+	if method == nil {
+		t.Fatal("expected non-nil FuncDecl")
+	}
+	if method.Recv.List[0].Names[0].Name != "t" {
+		t.Errorf("expected receiver 't' for type 'T', got %q", method.Recv.List[0].Names[0].Name)
 	}
 }

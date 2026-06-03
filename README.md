@@ -118,6 +118,45 @@ There are currently Try_μ, Guard_μ, Must_μ, Defer_μ, Log_μ, and Map/Filter/
  ```
  Other macros: MapKeys_μ, MapVals_μ, MapToSlice_μ, PrintMapKeys_μ, PrintMap_μ, PrintSlice_μ
 
+### Tap_μ — Pipeline side-effects
+
+ Execute a side-effect function in a NewSeq_μ pipeline without breaking the chain:
+
+ ```go
+	var debug []string
+	macro.NewSeq_μ(data).
+	    Tap_μ(func(v int) { debug = append(debug, fmt.Sprintf("item:%d", v)) }).
+	    Filter(func(v int) bool { return v > 3 }).
+	    Ret(&result)
+ ```
+
+ Supports `func(v T)` and `func(v T, i int)` signatures.
+
+### `//gpp:derive String` — Auto-generate String()
+
+ Generate a `String()` method for iota const types from a comment directive:
+
+ ```go
+	//gpp:derive String
+	type Color int
+
+	const (
+	    Red Color = iota
+	    Green
+	    Blue
+	)
+ ```
+
+ Generates a `func (c Color) String() string` with a switch statement over all constants. No macro import needed — works on any Go file.
+
+### `gpp check` — Validate macro usage
+
+ Check macro usage without building:
+
+	 gpp -check -C myproject
+
+ Reports unknown macros, wrong argument counts, and unsupported derive directives.
+
 ## Benchmarks
 
 	goos: linux
@@ -141,6 +180,7 @@ There are currently Try_μ, Guard_μ, Must_μ, Defer_μ, Log_μ, and Map/Filter/
 	gpp -run          # build and run
 	gpp -test         # run tests
 	gpp -diff         # show macro expansion diff (for debugging)
+	gpp -check        # validate macro usage without building
 	gpp -run -log="main.go:1[0-9]"  # selective logging
 
 	gpp -help
@@ -149,6 +189,8 @@ There are currently Try_μ, Guard_μ, Must_μ, Defer_μ, Log_μ, and Map/Filter/
 	        working directory (default ".")
 	  -args string
 	        args to go
+	  -check
+	        validate macro usage without building
 	  -diff
 	        show macro expansion diff without building
 	  -log string

@@ -137,7 +137,7 @@ Without visibility into what macros expand to, developers (and AI agents) can't 
 ---
 
 ## Phase 6: Developer Features
-**Status: 🔄 IN PROGRESS (2 of 10 done)**
+**Status: 🔄 IN PROGRESS (6 of 10 done)**
 
 ### What
 Practical macros and tooling improvements that make Go development more productive. These are general developer features, not AI-specific.
@@ -170,12 +170,13 @@ Go still requires verbose boilerplate for common patterns: error-aware cleanup, 
 ---
 
 #### 6.3 `Tap_μ` — Pipeline side-effects
-**Status: ❌ Stub only**
+**Status: ✅ DONE**
 
 - **What**: Execute a side-effect function in a NewSeq_μ pipeline without breaking the chain
 - **Why**: Developers need to add logging/metrics/debugging to data pipelines mid-chain. Go generics can't do this because methods can't introduce type params.
-- **How**: Register as a pipeline stage in `MacroNewSeq`. The tap function receives each element, executes it, but passes the original value through unchanged to the next stage.
-- **Status**: Skeleton in `macro/tap.go` — returns `false`, not functional. Needs integration with `MacroNewSeq` pipeline expander.
+- **How**: Integrated directly into `MacroNewSeq` pipeline expander. Tap generates a for-range loop that calls the side-effect function but does NOT create a new pipeline variable — the next stage reuses the same sequence. Supports both `func(v T)` and `func(v T, i int)` signatures. Resolves param count from FuncLit or named functions via `resolveExpr`.
+- **Files**: `macro/seq.go` (pipeline handling + Tap_μ method template + `_TF` type), `macro/tap.go`, `testdata/tap/`
+- **Verification**: Integration test passes with both 1-param and 2-param tap functions. `gpp -diff -C testdata/tap` shows correct expansion.
 ```go
 macro.NewSeq_μ(data).
     Map(transform).
@@ -186,18 +187,23 @@ macro.NewSeq_μ(data).
 
 ---
 
-#### 6.4 `//gpp:derive` directives
-**Status: ❌ Not started**
+#### 6.4 `//gpp:derive String` — Auto-generate String()
+**Status: ✅ DONE** (String only; Validate, MarshalJSON not yet implemented)
 
-- **What**: Comment-based auto-generation of `String()`, `Validate()`, `MarshalJSON()` from struct definitions and tags
-- **Why**: The #1 boilerplate pattern in Go. Every project needs these methods on enums and config structs.
-- **How**: Parse `//gpp:derive` comment directives on type declarations. For each derived interface, generate the method implementation as AST and inject into the file. `String` reads const values for iota types. `Validate` reads `validate:""` struct tags and generates `if` checks.
+- **What**: Comment-based auto-generation of `String()` method for iota const types
+- **Why**: Every Go project with enum types needs a `String()` method. Writing switch statements by hand is tedious and error-prone.
+- **How**: Parse `//gpp:derive String` comment directives on type declarations. Find const blocks using that type. Generate `func (t Type) String() string` with a switch statement and a default `fmt.Sprintf("Type(%d)", int(t))` case. Runs independently of macro imports — processes files before comment stripping in `parseDir`.
+- **Files**: `macro/derive.go` (ParseDeriveDirective, FindConstNamesForType, GenerateStringMethod, ProcessDeriveDirectives), `main.go` (derive processing in parseDir), `testdata/derive/`
+- **Verification**: Integration test passes with multiple iota types. `gpp -check -C testdata/derive` validates derive directives.
 ```go
-//gpp:derive String,Validate
-type Config struct {
-    Name string `validate:"required,min=3"`
-    Port int    `validate:"min=1,max=65535"`
-}
+//gpp:derive String
+type Color int
+
+const (
+    Red Color = iota
+    Green
+    Blue
+)
 ```
 
 ---
@@ -212,20 +218,24 @@ type Config struct {
 ---
 
 #### 6.6 `gpp check`
-**Status: ❌ Not started**
+**Status: ✅ DONE**
 
 - **What**: Validate macro usage without building. Returns structured diagnostics.
 - **Why**: Waiting for `go build` to discover macro misuse is too slow. Need fast feedback.
-- **How**: Reuse `parseDir` but skip the build step. Collect warnings (unknown macros, wrong arg counts, type mismatches) and output as JSON.
+- **How**: New `-check` flag loads packages and walks AST looking for `_μ`-suffixed calls. Checks: (1) is the macro name known? (2) does the argument count match? (3) are derive directives supported? Reports issues to stderr. Runs without expanding or building.
+- **Files**: `main.go` (checkMacros function, -check flag), `macro/derive.go` (ParseDeriveDirective)
+- **Verification**: `gpp -check -C testdata/try` reports "OK: no macro issues found." 
 
 ---
 
 #### 6.7 `Defer_μ` with custom handler
-**Status: ❌ Not started**
+**Status: ✅ DONE**
 
 - **What**: Allow specifying a custom error handler instead of logging
 - **Why**: Some projects want to track cleanup errors in metrics, not logs
-- **How**: `macro.Defer_μ(f.Close, func(err error) { metrics.Count("close_err", 1) })`
+- **How**: `macro.Defer_μ(f.Close, func(err error) { metrics.Count("close_err", 1) })`. Second optional argument replaces the default `log.Printf`. When custom handler is provided, the `log` import is NOT added.
+- **Files**: `macro/defer.go`, `testdata/defer/main.go`
+- **Verification**: Integration test passes — custom handler captures error correctly
 
 ---
 

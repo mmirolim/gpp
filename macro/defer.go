@@ -13,6 +13,8 @@ import (
 // Normally `defer f.Close()` silently ignores the error.
 // Defer_μ expands to a defer that logs the error from the cleanup call.
 //
+// Basic usage (logs error):
+//
 //	f, _ := os.Open("file.txt")
 //	macro.Defer_μ(f.Close)
 //
@@ -23,7 +25,19 @@ import (
 //	        log.Printf("gpp defer f.Close: %v", err)
 //	    }
 //	}()
-func Defer_μ(fn any) {}
+//
+// Custom handler:
+//
+//	macro.Defer_μ(f.Close, func(err error) { metrics.Count("close_err", 1) })
+//
+// Expands to:
+//
+//	defer func() {
+//	    if err := f.Close(); err != nil {
+//	        handlerFunc(err)
+//	    }
+//	}()
+func Defer_μ(fn any, handler ...func(error)) {}
 
 const Defer_μSymbol = "Defer_μ"
 
@@ -44,6 +58,12 @@ func MacroDeferExpand(
 
 	// The argument should be a function call like f.Close
 	cleanupCall := callArgs[0][0]
+
+	// Optional second argument: custom error handler
+	var customHandler ast.Expr
+	if len(callArgs[0]) >= 2 {
+		customHandler = callArgs[0][1]
+	}
 
 	// Get the call name for the error message
 	callName := "cleanup"
@@ -74,17 +94,26 @@ func MacroDeferExpand(
 		Rhs: []ast.Expr{cleanupCallExpr},
 	}
 
-	// log.Printf("gpp defer f.Close: %v", err)
-	logExpr := &ast.SelectorExpr{
-		X:   ast.NewIdent("log"),
-		Sel: ast.NewIdent("Printf"),
+	// Build the error handling body
+	var handleErrorStmt ast.Stmt
+	if customHandler != nil {
+		// Custom handler: handlerFunc(err)
+		handleCall := createCallExpr(customHandler, []ast.Expr{errIdent})
+		handleErrorStmt = &ast.ExprStmt{X: handleCall}
+	} else {
+		// Default: log.Printf("gpp defer f.Close: %v", err)
+		logExpr := &ast.SelectorExpr{
+			X:   ast.NewIdent("log"),
+			Sel: ast.NewIdent("Printf"),
+		}
+		logCall := createCallExpr(logExpr, []ast.Expr{
+			&ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("\"gpp defer %s: %%v\"", callName)},
+			errIdent,
+		})
+		handleErrorStmt = &ast.ExprStmt{X: logCall}
 	}
-	logCall := createCallExpr(logExpr, []ast.Expr{
-		&ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("\"gpp defer %s: %%v\"", callName)},
-		errIdent,
-	})
 
-	// if err != nil { log.Printf(...) }
+	// if err != nil { ... }
 	ifStmt := &ast.IfStmt{
 		Cond: &ast.BinaryExpr{
 			X:  ast.NewIdent("err"),
@@ -92,7 +121,7 @@ func MacroDeferExpand(
 			Y:  ast.NewIdent("nil"),
 		},
 		Body: &ast.BlockStmt{
-			List: []ast.Stmt{&ast.ExprStmt{X: logCall}},
+			List: []ast.Stmt{handleErrorStmt},
 		},
 	}
 
@@ -110,12 +139,14 @@ func MacroDeferExpand(
 		Call: deferCall,
 	}
 
-	// Replace the macro.Defer_μ(f.Close) call with the expanded defer
+	// Replace the macro.Defer_μ(...) call with the expanded defer
 	cur.InsertAfter(deferStmt)
 	cur.Delete()
 
-	// Add "log" import if not already present
-	astutil.AddImport(ctx.Fset, ctx.File, "log")
+	// Add "log" import only when using default handler
+	if customHandler == nil {
+		astutil.AddImport(ctx.Fset, ctx.File, "log")
+	}
 
 	return true
 }

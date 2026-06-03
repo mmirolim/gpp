@@ -88,10 +88,32 @@ guard ok ok
 			srcDir: filepath.Join(stagingBase, "testdata", "defer"),
 			output: `
 noErrDefer ok
+customHandler custom err
 errDefer ok
 `,
 			err:        nil,
 			looseMatch: true, // error case also logs with dynamic timestamp
+		},
+		{
+			desc:   "Test tap_μ",
+			srcDir: filepath.Join(stagingBase, "testdata", "tap"),
+			output: `
+Tap_μ evens [2 4]
+Tap_μ log [1 2 3 4 5]
+Tap_μ mapped [10 20 30 40 50]
+Tap_μ idxLog [0:10 1:20 2:30 3:40 4:50]
+`,
+			err: nil,
+		},
+		{
+			desc:   "Test gpp:derive String",
+			srcDir: filepath.Join(stagingBase, "testdata", "derive"),
+			output: `
+Red=Red Blue=Blue Unknown=Color(99)
+Active=StatusActive Inactive=StatusInactive Pending=StatusPending
+StatusUnknown=Status(0)
+`,
+			err: nil,
 		},
 	}
 

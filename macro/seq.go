@@ -17,6 +17,7 @@ type seq_μ []_T
 type _RF func(_T, _T, int) _T
 type _PF func(_T, int) bool
 type _MF func(_T, int) _T
+type _TF func(_T, int)
 type _T any
 type _G any
 
@@ -90,6 +91,18 @@ func Map_μ(in, out, fn any) {
 	for i := range input {
 		*res = append(*res, fun(input[i], i))
 	}
+}
+
+// Tap_μ executes a side-effect function for each element without breaking the chain.
+// fn must be in form func(_T [, int]) — no return value.
+// The pipeline continues with the same sequence unchanged.
+func (seq *seq_μ) Tap_μ(fn any) *seq_μ {
+	f := (_TF)(nil)
+	in := []_T{}
+	for i, v := range in {
+		f(v, i)
+	}
+	return seq
 }
 
 // Reduce_μ in pointer/value to slice, out pointer *_G and fn func(_G, _T [, int]) _G
@@ -172,6 +185,62 @@ func MacroNewSeq(
 				Name: fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)-1),
 				Obj:  prevObj,
 			})
+
+			// Tap_μ: generate side-effect loop, no new output variable
+			if ident.Name == "Tap_μ" {
+				seqVarName := fmt.Sprintf("%s%d", "seq", len(newSeqBlocks)-1)
+				tapFn := callArgs[i][0]
+
+				// Determine param count of tap function
+				paramsNum := 1
+				switch fn := tapFn.(type) {
+				case *ast.FuncLit:
+					cnt := 0
+					for _, field := range fn.Type.Params.List {
+						cnt += len(field.Names)
+					}
+					paramsNum = cnt
+				default:
+					obj := resolveExpr(fn, ctx.Pkg)
+					if obj != nil && obj.Decl != nil {
+						if fd, ok := obj.Decl.(*ast.FuncDecl); ok {
+							cnt := 0
+							for _, field := range fd.Type.Params.List {
+								cnt += len(field.Names)
+							}
+							paramsNum = cnt
+						}
+					}
+				}
+
+				// Build call args: tapFn(v[, i])
+				var tapArgs []ast.Expr
+				tapArgs = append(tapArgs, ast.NewIdent("v"))
+				if paramsNum >= 2 {
+					tapArgs = append(tapArgs, ast.NewIdent("i"))
+				}
+
+				tapCall := createCallExpr(tapFn, tapArgs)
+
+				// Range key: use "_" if no index needed, "i" otherwise
+				rangeKey := ast.NewIdent("_")
+				if paramsNum >= 2 {
+					rangeKey = ast.NewIdent("i")
+				}
+
+				forStmt := &ast.RangeStmt{
+					Key:   rangeKey,
+					Value: ast.NewIdent("v"),
+					Tok:   token.DEFINE,
+					X:     &ast.Ident{Name: seqVarName, Obj: prevObj},
+					Body: &ast.BlockStmt{
+						List: []ast.Stmt{&ast.ExprStmt{X: tapCall}},
+					},
+				}
+				blocks = append(blocks, forStmt)
+				continue
+			}
+
 			var funcType *ast.FuncType
 			if ident.Name != "Ret" {
 				// handle func lit and functions
